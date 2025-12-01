@@ -2,6 +2,8 @@ import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
+    PROJECT_NAME: str = "Control de Gastos API"
+
     # Base de datos
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
