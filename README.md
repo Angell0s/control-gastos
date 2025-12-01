@@ -16,7 +16,7 @@ Una aplicación Full-Stack robusta para la gestión de finanzas personales, cons
 
 El proyecto sigue una arquitectura modular:
 
-''' bash
+```
 control-gastos/
 ├── .env # Variables de entorno globales (NO SUBIR A GIT)
 ├── .gitignore # Archivos ignorados
@@ -31,7 +31,7 @@ control-gastos/
 │ │ └── schemas/ # Esquemas Pydantic (Validación y Respuesta)
 │ └── initial_data.py # Script para crear usuario administrador
 └── frontend/ # (Próximamente)
-'''
+```
 ---
 
 ## 🛠️ Configuración e Instalación
