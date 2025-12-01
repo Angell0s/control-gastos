@@ -1,0 +1,123 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: gastos_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - gastos_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    container_name: gastos_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - gastos_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend FastAPI
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: gastos_backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    networks:
+      - gastos_network
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Worker de tareas
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    container_name: gastos_worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - RUNNING_IN_DOCKER=true
+    depends_on:
+      - backend
+      - redis
+    volumes:
+      - ./worker:/app
+    networks:
+      - gastos_network
+
+  # Bot de Telegram
+  bot:
+    build:
+      context: ./bot/src/bot
+      dockerfile: Dockerfile
+    container_name: gastos_bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      - backend
+    volumes:
+      - ./bot:/app
+    networks:
+      - gastos_network
+
+  # Frontend Next.js
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: gastos_frontend
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    networks:
+      - gastos_network
+    command: npm run dev
+
+networks:
+  gastos_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
