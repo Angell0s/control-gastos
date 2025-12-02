@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field
 # --- Schemas para Category ---
 class CategoryBase(BaseModel):
     name: str
-    user_id: Optional[int] = None
 
 class CategoryCreate(CategoryBase):
     pass
@@ -47,7 +46,7 @@ class ExpenseCreate(ExpenseBase):
 
 class ExpenseResponse(ExpenseBase):
     id: UUID
-    user_id: int
+    user_id: UUID
     total: float
     date: datetime
     items: List[ExpenseItemResponse] = []

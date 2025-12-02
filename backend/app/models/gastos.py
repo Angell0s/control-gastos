@@ -4,15 +4,11 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID
 from app.db.session import Base
 
-# Nota: Asumimos que 'users' ya está definido en otro lugar.
-
 class Category(Base):
     __tablename__ = "categories"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String, unique=True, index=True, nullable=False)
-    # FK a users.id (Integer según tu modelo existente)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
     # Relaciones
     expense_items = relationship("ExpenseItem", back_populates="category")
@@ -22,7 +18,10 @@ class Expense(Base):
     __tablename__ = "expenses"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    
+    # CORREGIDO: Ahora coincide con users.id que es UUID
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    
     date = Column(DateTime(timezone=True), server_default=func.now())
     total = Column(Float, default=0.0)
     notes = Column(String, nullable=True)
@@ -35,6 +34,8 @@ class ExpenseItem(Base):
     __tablename__ = "expense_items"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    
+    # Estos ya estaban bien (apuntan a tablas que usan UUID)
     expense_id = Column(UUID(as_uuid=True), ForeignKey("expenses.id"), nullable=False)
     category_id = Column(UUID(as_uuid=True), ForeignKey("categories.id"), nullable=False)
     
