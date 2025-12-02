@@ -1,3 +1,4 @@
+#backend\app\api\main.py
 from fastapi import APIRouter
 from app.api.routers import users, expenses, auth, categories
 

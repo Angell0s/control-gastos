@@ -1,21 +1,38 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, ConfigDict
 from typing import Optional
+from uuid import UUID
 
-# Esquema base con datos comunes
+# 1. UserBase: Datos compartidos
 class UserBase(BaseModel):
     email: EmailStr
-    is_active: Optional[bool] = True
-    is_superuser: Optional[bool] = False
+    is_active: bool = True
+    is_superuser: bool = False
+    
+    # Nuevos campos (Opcionales porque en la DB son nullable=True)
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    phone: Optional[str] = None
 
-# Esquema para crear un usuario (aquí sí pedimos password)
+# 2. UserCreate: Lo necesario para registrarse
 class UserCreate(UserBase):
     password: str
 
-# Esquema para LEER un usuario (respuesta de la API)
-# ¡Aquí NO incluimos el password!
-class UserResponse(UserBase):
-    id: int
+# 3. UserUpdate: Para actualizar perfil (Opcional pero recomendado)
+class UserUpdate(BaseModel):
+    # En update, todos los campos suelen ser opcionales
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    phone: Optional[str] = None
+    password: Optional[str] = None
+    email: Optional[EmailStr] = None
 
-    # Esta configuración es vital para que Pydantic lea objetos de SQLAlchemy
-    class Config:
-        from_attributes = True 
+# 4. UserResponse: Lo que devuelve la API
+class UserResponse(UserBase):
+    id: UUID
+    
+    # Configuración para Pydantic V2 (compatible con ORMs)
+    model_config = ConfigDict(from_attributes=True)
+    
+    # Si usas una versión vieja de Pydantic (v1), usa esto en su lugar:
+    # class Config:
+    #     orm_mode = True
