@@ -1,3 +1,4 @@
+#bot\services\api_client.py
 import aiohttp
 import logging
 from typing import Optional, Dict, Any
@@ -23,6 +24,7 @@ class BackendClient:
         """Paso 1: Verificar si existe el teléfono"""
         session = await self.get_session()
         try:
+            # IMPORTANTE: Usar json=payload, no data=payload
             async with session.post(f"{self.base_url}/api/v1/telegram/check-phone", json={"phone": phone}) as resp:
                 return resp.status == 200
         except Exception as e:
@@ -53,5 +55,17 @@ class BackendClient:
         except Exception as e:
             logger.error(f"Error login_silent: {e}")
             return None
+
+    # ✅ NUEVO MÉTODO: Logout / Desvincular
+    async def unlink_account(self, chat_id: int) -> bool:
+        """Llama al backend para borrar la vinculación de Telegram"""
+        session = await self.get_session()
+        try:
+            # Reutilizamos el schema TelegramLoginRequest que solo pide telegram_chat_id
+            async with session.post(f"{self.base_url}/api/v1/telegram/unlink", json={"telegram_chat_id": chat_id}) as resp:
+                return resp.status == 200
+        except Exception as e:
+            logger.error(f"Error unlink_account: {e}")
+            return False
 
 api_client = BackendClient()

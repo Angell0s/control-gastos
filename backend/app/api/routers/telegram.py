@@ -1,10 +1,11 @@
+#backend\app\api\routers\telegram.py
 from typing import Any
 from datetime import timedelta
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
-from sqlalchemy.orm import Session  # ✅ Usamos Session síncrona
+from sqlalchemy.orm import Session 
 
 from app.db.session import get_db
 from app.models.user import User
@@ -16,6 +17,7 @@ from app.schemas.telegram import (
     TelegramLoginRequest,
     TelegramAuthResponse
 )
+from app.services.audit import log_activity 
 
 def normalize_phone(phone: str | None) -> str | None:
     """Normaliza cualquier número mexicano → formato E.164 sin '+' (ej: 528468996046)"""
@@ -37,15 +39,12 @@ def check_phone_exists(
     db: Session = Depends(get_db)
 ) -> dict[str, bool]:
     raw_phone = data.phone.strip() if data.phone else ""
-    # Normalizamos teléfono
     phone_normalized = normalize_phone(raw_phone)
-    
     print(f"📱 Check Phone: '{raw_phone}' -> '{phone_normalized}'")
     
     if not phone_normalized:
         return {"exists": False}
     
-    # Consulta Síncrona
     user = db.scalar(select(User).where(User.phone == phone_normalized))
     
     if user:
@@ -60,32 +59,25 @@ def login_telegram_secure(
     data: TelegramAuthStep2,
     db: Session = Depends(get_db)
 ) -> TelegramAuthResponse:
-    # 1. Normalizar Teléfono
     phone_normalized = normalize_phone(data.phone)
-    
-    # 2. Normalizar Email (Minúsculas y sin espacios)
     email_normalized = data.email.lower().strip()
 
     if not phone_normalized:
         raise HTTPException(status_code=400, detail="Número de teléfono inválido")
 
-    print(f"🔐 Login Seguro Intentando:")
-    print(f"   📱 Phone: {phone_normalized}")
-    print(f"   📧 Email: {email_normalized}")
+    print(f"🔐 Login Seguro Intentando: Phone: {phone_normalized} | Email: {email_normalized}")
 
-    # 3. Buscar coincidencia exacta (Síncrono)
     user = db.scalar(select(User).where(
         (User.phone == phone_normalized) & (User.email == email_normalized)
     ))
 
     if not user:
-        print("❌ Fallo de autenticación: Datos no coinciden")
+        print("❌ Fallo de autenticación")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="El email no coincide con el teléfono registrado"
         )
 
-    # 4. Vincular Telegram ID si es nuevo
     if data.telegram_chat_id and user.telegram_chat_id != data.telegram_chat_id:
         print(f"🔗 Vinculando nuevo Chat ID: {data.telegram_chat_id}")
         user.telegram_chat_id = data.telegram_chat_id
@@ -93,13 +85,22 @@ def login_telegram_secure(
         db.commit()
         db.refresh(user)
 
-    # 5. Generar Token
     access_token = security.create_access_token(
         subject=str(user.id),
         expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
 
     print(f"✅ Login Exitoso: {user.first_name}")
+
+    log_activity(
+        db=db,
+        user_id=user.id,
+        action="LOGIN",
+        source="TELEGRAM",
+        details=f"Login seguro via Bot (Phone: {phone_normalized})",
+        update_last_login=True
+    )
+
     return TelegramAuthResponse(
         access_token=access_token,
         token_type="bearer",
@@ -113,7 +114,6 @@ def login_by_telegram_id(
 ) -> TelegramAuthResponse:
     print(f"🤫 Login Silencioso ID: {data.telegram_chat_id}")
     
-    # Consulta Síncrona
     user = db.scalar(select(User).where(User.telegram_chat_id == data.telegram_chat_id))
 
     if not user:
@@ -128,9 +128,51 @@ def login_by_telegram_id(
         expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
 
+    log_activity(
+        db=db,
+        user_id=user.id,
+        action="LOGIN_SILENT",
+        source="TELEGRAM",
+        details="Reconexión automática",
+        update_last_login=True
+    )
+
     print(f"✅ Login Silencioso Exitoso: {user.first_name}")
     return TelegramAuthResponse(
         access_token=access_token,
         token_type="bearer",
         user_name=user.first_name or "Usuario"
     )
+
+# ✅ --- NUEVO: DESVINCULAR DESDE EL BOT ---
+@router.post("/unlink", status_code=200)
+def unlink_telegram_bot(
+    data: TelegramLoginRequest, # Reutilizamos este schema porque trae 'telegram_chat_id'
+    db: Session = Depends(get_db)
+) -> dict:
+    """
+    Permite al usuario desvincularse usando un comando en el bot (ej: /logout).
+    """
+    print(f"✂️ Intentando desvincular Chat ID: {data.telegram_chat_id}")
+    
+    user = db.scalar(select(User).where(User.telegram_chat_id == data.telegram_chat_id))
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado o ya desvinculado")
+    
+    # Borramos datos
+    user.telegram_chat_id = None
+    user.phone = None
+    
+    db.add(user)
+    db.commit()
+    
+    log_activity(
+        db=db,
+        user_id=user.id,
+        action="UNLINK_TELEGRAM",
+        source="TELEGRAM_BOT",
+        details="Desvinculación solicitada vía comando Bot"
+    )
+    
+    return {"message": "Cuenta desvinculada correctamente. Deberás registrarte de nuevo para usar el bot."}

@@ -1,8 +1,9 @@
+//frontend\src\components\DataTable.tsx
 "use client";
 
 import { ReactNode, useState } from "react";
 import { cn } from "@/lib/utils";
-import { Modal } from "./Modal"; // Asegúrate de tener este componente creado
+import { Modal } from "./Modal"; 
 import { 
   CheckBadgeIcon, 
   NoSymbolIcon, 

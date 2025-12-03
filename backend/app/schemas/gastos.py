@@ -1,3 +1,4 @@
+#backend\app\schemas\gastos.py
 from typing import List, Optional
 from uuid import UUID
 from datetime import datetime
@@ -10,11 +11,14 @@ class CategoryBase(BaseModel):
 class CategoryCreate(CategoryBase):
     pass
 
+class CategoryUpdate(BaseModel):
+    name: str 
+
 class CategoryResponse(CategoryBase):
     id: UUID
 
     class Config:
-        from_attributes = True  # Reemplaza orm_mode en Pydantic v2
+        from_attributes = True
 
 # --- Schemas para ExpenseItem ---
 class ExpenseItemBase(BaseModel):

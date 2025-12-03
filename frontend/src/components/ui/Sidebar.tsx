@@ -21,7 +21,8 @@ import {
   EnvelopeIcon,
   PhoneIcon,
   ShieldCheckIcon,
-  IdentificationIcon
+  IdentificationIcon,
+  ClipboardDocumentListIcon
 } from "@heroicons/react/24/outline";
 import { useAuthStore } from "@/store/authStore";
 import { useUIStore } from "@/store/uiStore";
@@ -41,6 +42,7 @@ const navigation: NavItem[] = [
   { name: "Usuarios", href: "/users", icon: UsersIcon, requiredPermission: 'superuser' },
   { name: "Categorías", href: "/categorias", icon: TagIcon },
   { name: "Reportes", href: "/reportes", icon: ChartPieIcon },
+  { name: "Bitácora", href: "/bitacora", icon: ClipboardDocumentListIcon,  requiredPermission: 'superuser' },
 ];
 
 // --- CONTENIDO DEL MODAL (Reutilizable visualmente) ---

@@ -1,3 +1,4 @@
+#backend\app\models\gastos.py
 import uuid
 from sqlalchemy import Column, String, Integer, ForeignKey, DateTime, Float, func
 from sqlalchemy.orm import relationship

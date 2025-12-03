@@ -1,3 +1,4 @@
+#backend\app\api\routers\expenses.py
 from typing import List, Any
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Response
@@ -5,11 +6,12 @@ from sqlalchemy.orm import Session
 from app.api import deps
 from app.models import Expense, ExpenseItem, User
 from app.schemas import ExpenseCreate, ExpenseResponse
+from app.services.audit import log_activity  # ✅ IMPORTAR SERVICIO DE AUDITORÍA
 
 router = APIRouter()
 
 # -----------------------------------------------------------------------------
-# 1. CREATE (POST) - Ya lo conoces, pero repasamos
+# 1. CREATE (POST)
 # -----------------------------------------------------------------------------
 @router.post("/", response_model=ExpenseResponse, status_code=status.HTTP_201_CREATED)
 def create_expense(
@@ -49,6 +51,16 @@ def create_expense(
         
         db.commit()
         db.refresh(db_expense) # Refrescamos para cargar la relación .items
+
+        # ✅ LOG DE AUDITORÍA: CREACIÓN
+        log_activity(
+            db=db,
+            user_id=current_user.id,
+            action="CREATE_EXPENSE",
+            source="WEB",
+            details=f"Gasto creado por ${calculated_total:.2f} con {len(expense_in.items)} ítems."
+        )
+
     except Exception as e:
         db.rollback()
         # Borramos el expense huérfano si fallan los items
@@ -125,21 +137,32 @@ def delete_expense(
     if expense.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="No tienes permiso para borrar este gasto")
 
+    # Guardamos datos para el log antes de borrar
+    total_deleted = expense.total
+    items_count = len(expense.items)
+
     db.delete(expense)
     db.commit()
+
+    # ✅ LOG DE AUDITORÍA: ELIMINACIÓN
+    log_activity(
+        db=db,
+        user_id=current_user.id,
+        action="DELETE_EXPENSE",
+        source="WEB",
+        details=f"Gasto eliminado (${total_deleted:.2f}, {items_count} ítems)."
+    )
+
     return Response(status_code=204)
     
 
-
 # -----------------------------------------------------------------------------
-# 5. UPDATE (PUT) - La parte difícil
+# 5. UPDATE (PUT)
 # -----------------------------------------------------------------------------
-# Nota: Para simplificar, la edición reemplaza TODOS los ítems.
-# Es decir, borramos los viejos y creamos los nuevos que mande el frontend.
 @router.put("/{expense_id}", response_model=ExpenseResponse)
 def update_expense(
     expense_id: UUID,
-    expense_in: ExpenseCreate, # Reusamos el schema de crear
+    expense_in: ExpenseCreate, 
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ) -> Any:
@@ -153,6 +176,9 @@ def update_expense(
         
     if expense.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="No tienes permiso para editar este gasto")
+
+    # Guardamos el total anterior para el log
+    old_total = expense.total
 
     # 1. Actualizar campos simples de la cabecera
     if expense_in.notes is not None:
@@ -182,6 +208,16 @@ def update_expense(
     try:
         db.commit()
         db.refresh(expense)
+
+        # ✅ LOG DE AUDITORÍA: ACTUALIZACIÓN
+        log_activity(
+            db=db,
+            user_id=current_user.id,
+            action="UPDATE_EXPENSE",
+            source="WEB",
+            details=f"Gasto actualizado. Nuevo total: ${new_total:.2f} (Anterior: ${old_total:.2f})."
+        )
+
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=f"Error actualizando: {str(e)}")
