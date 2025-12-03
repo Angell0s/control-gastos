@@ -61,3 +61,20 @@ def get_current_user(
         
     # Si todo está bien, devolvemos el objeto usuario completo
     return user
+
+def get_current_active_superuser(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """
+    Valida que el usuario esté logueado, sea activo y sea Superusuario.
+    """
+    if not current_user.is_active:
+        raise HTTPException(status_code=400, detail="El usuario está inactivo")
+    
+    if not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="No tienes privilegios suficientes (Requiere Superusuario)"
+        )
+    
+    return current_user

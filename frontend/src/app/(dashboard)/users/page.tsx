@@ -1,3 +1,4 @@
+//frontend\src\app\(dashboard)\users\page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -12,6 +13,8 @@ import {
   ShieldCheckIcon,
   CalendarDaysIcon
 } from "@heroicons/react/24/outline";
+import AdminGuard from "@/components/AdminGuard";
+import api from '@/lib/api';
 
 // Interfaz exacta segun tu respuesta JSON del backend
 interface User {
@@ -101,15 +104,15 @@ export default function UsuariosPage() {
   useEffect(() => {
     const fetchUsers = async () => {
       if (!token) return;
+
       try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/users/`, {
-          headers: { Authorization: `Bearer ${token}` },
+        const res = await api.get("/users/", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
         });
-        
-        if (!res.ok) throw new Error("Error al cargar usuarios");
-        
-        const data = await res.json();
-        setUsers(data);
+
+        setUsers(res.data);
       } catch (err) {
         setError("No se pudo conectar con el servidor.");
         console.error(err);
@@ -121,7 +124,9 @@ export default function UsuariosPage() {
     fetchUsers();
   }, [token]);
 
+
   return (
+    <AdminGuard>
     <div className="p-6 space-y-6 max-w-7xl mx-auto animate-in fade-in duration-500">
       {/* HEADER DE PAGINA */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -225,5 +230,6 @@ export default function UsuariosPage() {
         )}
       />
     </div>
+    </AdminGuard>
   );
 }

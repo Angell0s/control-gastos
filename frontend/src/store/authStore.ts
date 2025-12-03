@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import api from '@/lib/api';
 
 // Interfaz basada en tu esquema UserResponse de Pydantic
 interface User {
@@ -36,33 +37,17 @@ export const useAuthStore = create<AuthState>()(
       },
 
       fetchUser: async () => {
-        const { token, logout } = get();
-        if (!token) return;
-
         try {
-          // Ajusta la URL si tu prefijo de API es diferente (ej: /api/v1)
-          const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/users/me`, {
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
-            },
-          });
-
-          if (!response.ok) {
-            // Si el token expiró o es inválido (401), cerramos sesión
-            if (response.status === 401) {
-              logout();
-            }
-            throw new Error("Error al obtener usuario");
+          const response = await api.get("/users/me");
+          set({ user: response.data });
+        } catch (error: any) {
+          if (error.response?.status === 401) {
+            get().logout();
           }
-
-          const userData: User = await response.json();
-          set({ user: userData });
-        } catch (error) {
           console.error("Error fetching user:", error);
         }
       },
+
     }),
     {
       name: 'auth-storage', // Nombre de la key en localStorage

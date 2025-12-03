@@ -1,3 +1,4 @@
+#backend\app\schemas\user.py
 from pydantic import BaseModel, EmailStr, ConfigDict
 from typing import Optional
 from uuid import UUID
@@ -36,3 +37,10 @@ class UserResponse(UserBase):
     # Si usas una versión vieja de Pydantic (v1), usa esto en su lugar:
     # class Config:
     #     orm_mode = True
+
+class UserSignup(BaseModel):
+    email: EmailStr
+    password: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    phone: Optional[str] = None
