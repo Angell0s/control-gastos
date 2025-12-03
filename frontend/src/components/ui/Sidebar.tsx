@@ -1,3 +1,4 @@
+//frontend\src\components\ui\Sidebar.tsx
 "use client";
 
 import { useState } from "react";
@@ -6,7 +7,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
 import { Button } from "./Button";
-import { Modal } from "./../Modal"; // Asegúrate de importar el Modal genérico
+import { Modal } from "./../Modal";
 import {
   HomeIcon,
   UsersIcon,
@@ -22,7 +23,10 @@ import {
   PhoneIcon,
   ShieldCheckIcon,
   IdentificationIcon,
-  ClipboardDocumentListIcon
+  ClipboardDocumentListIcon,
+  ChevronDownIcon,
+  PlusIcon,
+  ListBulletIcon
 } from "@heroicons/react/24/outline";
 import { useAuthStore } from "@/store/authStore";
 import { useUIStore } from "@/store/uiStore";
@@ -33,20 +37,35 @@ type NavItem = {
   name: string;
   href: string;
   icon: (props: React.ComponentProps<'svg'>) => JSX.Element;
-  requiredPermission?: 'superuser'; 
+  requiredPermission?: 'superuser';
+  // ✅ NUEVO: Soporte para sub-menús
+  children?: {
+    name: string;
+    href: string;
+    icon?: (props: React.ComponentProps<'svg'>) => JSX.Element;
+    action?: string; // Para identificar acciones especiales (abrir modal)
+  }[];
 };
 
 const navigation: NavItem[] = [
   { name: "Dashboard", href: "/dashboard", icon: HomeIcon },
-  { name: "Mis Gastos", href: "/gastos", icon: BanknotesIcon },
+  { 
+    name: "Mis Gastos", 
+    href: "/gastos", 
+    icon: BanknotesIcon,
+    // ✅ AÑADIMOS HIJOS A GASTOS
+    children: [
+      { name: "Ver Listado", href: "/gastos", icon: ListBulletIcon },
+      { name: "Registrar Nuevo", href: "/gastos?action=new", icon: PlusIcon, action: "new-expense" }
+    ]
+  },
   { name: "Usuarios", href: "/users", icon: UsersIcon, requiredPermission: 'superuser' },
   { name: "Categorías", href: "/categorias", icon: TagIcon },
   { name: "Reportes", href: "/reportes", icon: ChartPieIcon },
-  { name: "Bitácora", href: "/bitacora", icon: ClipboardDocumentListIcon,  requiredPermission: 'superuser' },
+  { name: "Bitácora", href: "/bitacora", icon: ClipboardDocumentListIcon, requiredPermission: 'superuser' },
 ];
 
-// --- CONTENIDO DEL MODAL (Reutilizable visualmente) ---
-// Este componente renderiza el detalle del usuario dentro del modal
+// --- COMPONENTE DE DETALLE DE USUARIO (SIN CAMBIOS) ---
 const UserProfileDetail = ({ user }: { user: any }) => (
   <div className="space-y-6">
     {/* Header Avatar */}
@@ -109,14 +128,20 @@ const UserProfileDetail = ({ user }: { user: any }) => (
   </div>
 );
 
+// --- SIDEBAR PRINCIPAL ---
 export function Sidebar() {
   const router = useRouter();
   const pathname = usePathname();
+  
+  // Estados UI
   const [isMobileOpen, setIsMobileOpen] = useState(false);
-  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false); // Estado para el modal propio
-  const { setTheme } = useTheme();
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  
+  // ✅ NUEVO: Estado para controlar qué submenú está abierto
+  // Guardamos el 'name' del item padre desplegado.
+  const [openSubmenu, setOpenSubmenu] = useState<string | null>("Mis Gastos"); 
 
-  // Obtenemos user directamente (YA NO LLAMAMOS A FETCHUSER AQUÍ)
+  const { setTheme } = useTheme();
   const { logout, user } = useAuthStore();
   const { isSidebarCollapsed, toggleSidebar } = useUIStore();
 
@@ -126,22 +151,31 @@ export function Sidebar() {
     router.push("/login");
   };
 
-  const displayName =
-    user?.first_name && user?.last_name
+  // --- LÓGICA DE USUARIO ---
+  const displayName = user?.first_name && user?.last_name
       ? `${user.first_name} ${user.last_name}`
       : user?.email || "Cargando...";
 
-  const initials =
-    user?.first_name && user?.last_name
+  const initials = user?.first_name && user?.last_name
       ? (user.first_name[0] + user.last_name[0]).toUpperCase()
       : user?.email?.slice(0, 2).toUpperCase() || "US";
 
-  // Filtrado de navegación
+  // --- FILTRADO DE NAVEGACIÓN ---
   const filteredNavigation = navigation.filter(item => {
     if (!item.requiredPermission) return true;
     if (item.requiredPermission === 'superuser') return user?.is_superuser === true;
     return false;
   });
+
+  // --- TOGGLE SUBMENU ---
+  const toggleSubmenu = (itemName: string) => {
+    if (isSidebarCollapsed) {
+      toggleSidebar(); // Si está colapsado, abrir sidebar para ver submenú
+      setOpenSubmenu(itemName);
+    } else {
+      setOpenSubmenu(prev => (prev === itemName ? null : itemName));
+    }
+  };
 
   return (
     <>
@@ -153,11 +187,7 @@ export function Sidebar() {
           onClick={() => setIsMobileOpen(!isMobileOpen)}
           className="bg-card shadow-md border-border"
         >
-          {isMobileOpen ? (
-            <XMarkIcon className="h-6 w-6 text-foreground" />
-          ) : (
-            <Bars3Icon className="h-6 w-6 text-foreground" />
-          )}
+          {isMobileOpen ? <XMarkIcon className="h-6 w-6" /> : <Bars3Icon className="h-6 w-6" />}
         </Button>
       </div>
 
@@ -169,18 +199,16 @@ export function Sidebar() {
         />
       )}
 
-      {/* --- SIDEBAR CONTAINER --- */}
+      {/* --- SIDEBAR ASIDE --- */}
       <aside
         className={cn(
           "fixed top-0 left-0 z-40 h-screen bg-card border-r border-border shadow-xl lg:shadow-none",
-          "transition-all duration-300 ease-in-out",
+          "transition-all duration-300 ease-in-out flex flex-col",
           isSidebarCollapsed ? "w-20" : "w-64",
-          isMobileOpen
-            ? "translate-x-0"
-            : "-translate-x-full lg:translate-x-0"
+          isMobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         )}
       >
-        {/* Botón Colapsar */}
+        {/* Botón Colapsar Desktop */}
         <div className="hidden lg:flex absolute -right-3 top-9 z-50">
           <Button
             onClick={toggleSidebar}
@@ -188,90 +216,104 @@ export function Sidebar() {
             variant="outline"
             className="h-6 w-6 rounded-full bg-card border border-border shadow-sm hover:bg-accent p-0"
           >
-            {isSidebarCollapsed ? (
-              <ChevronRightIcon className="h-3 w-3 text-muted-foreground" />
-            ) : (
-              <ChevronLeftIcon className="h-3 w-3 text-muted-foreground" />
-            )}
+            {isSidebarCollapsed ? <ChevronRightIcon className="h-3 w-3" /> : <ChevronLeftIcon className="h-3 w-3" />}
           </Button>
         </div>
 
-        <div className="flex flex-col h-full py-4 overflow-x-hidden">
+        {/* CONTENIDO SCROLLABLE */}
+        <div className="flex flex-col h-full py-4 overflow-y-auto overflow-x-hidden custom-scrollbar">
+          
           {/* LOGO */}
-          <div
-            className={cn(
-              "mb-6 flex items-center px-4 h-10 transition-all duration-500",
-              isSidebarCollapsed ? "justify-center" : "justify-start"
-            )}
-          >
+          <div className={cn("mb-6 flex items-center px-4 h-10 transition-all duration-500", isSidebarCollapsed ? "justify-center" : "justify-start")}>
             <div className="h-8 w-8 rounded-lg bg-primary flex flex-shrink-0 items-center justify-center text-primary-foreground font-bold shadow-lg shadow-primary/30">
               $
             </div>
-            <div
-              className={cn(
-                "ml-3 overflow-hidden whitespace-nowrap transition-all duration-300 ease-in-out",
-                isSidebarCollapsed
-                  ? "w-0 opacity-0"
-                  : "w-auto opacity-100 delay-200"
-              )}
-            >
+            <div className={cn("ml-3 overflow-hidden whitespace-nowrap transition-all duration-300 ease-in-out", isSidebarCollapsed ? "w-0 opacity-0" : "w-auto opacity-100 delay-200")}>
               <h1 className="text-lg font-bold text-foreground">MisGastos</h1>
             </div>
           </div>
 
-          {/* MENU */}
+          {/* NAVEGACIÓN */}
           <nav className="flex-1 space-y-1 px-3">
-            <p
-              className={cn(
-                "px-2 text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2 whitespace-nowrap transition-all duration-300",
-                isSidebarCollapsed
-                  ? "w-0 opacity-0 translate-x-[-10px]"
-                  : "w-auto opacity-100 translate-x-0 delay-200"
-              )}
-            >
+            <p className={cn("px-2 text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2 whitespace-nowrap transition-all duration-300", isSidebarCollapsed ? "w-0 opacity-0 translate-x-[-10px]" : "w-auto opacity-100 translate-x-0 delay-200")}>
               Menu Principal
             </p>
+            
             <ul className="space-y-1">
               {filteredNavigation.map((item) => {
                 const isActive = pathname === item.href;
+                const hasChildren = !!item.children;
+                const isOpen = openSubmenu === item.name;
+
                 return (
                   <li key={item.name}>
-                    <Link
-                      href={item.href}
-                      onClick={() => setIsMobileOpen(false)}
-                      className={cn(
-                        "group flex items-center rounded-md transition-all duration-300 relative overflow-hidden",
-                        isSidebarCollapsed ? "justify-center p-2" : "px-3 py-2",
-                        isActive
-                          ? "bg-primary/10 text-primary font-medium"
-                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                      )}
-                      title={isSidebarCollapsed ? item.name : ""}
-                    >
-                      {isActive && !isSidebarCollapsed && (
-                        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-primary rounded-r-full animate-in fade-in slide-in-from-left-1 duration-300" />
-                      )}
-                      <item.icon
+                    {/* --- ÍTEM PADRE --- */}
+                    {hasChildren ? (
+                      // Si tiene hijos, es un botón desplegable
+                      <button
+                        onClick={() => toggleSubmenu(item.name)}
                         className={cn(
-                          "flex-shrink-0 transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]",
-                          isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5 mr-3",
-                          "group-hover:scale-110 group-hover:rotate-6",
-                          isActive
-                            ? "text-primary"
-                            : "text-muted-foreground group-hover:text-foreground"
+                          "w-full group flex items-center rounded-md transition-all duration-200 relative overflow-hidden",
+                          isSidebarCollapsed ? "justify-center p-2" : "px-3 py-2 justify-between",
+                          isActive || isOpen ? "text-foreground bg-accent/50" : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                         )}
-                      />
-                      <span
-                        className={cn(
-                          "text-sm whitespace-nowrap transition-all duration-300",
-                          isSidebarCollapsed
-                            ? "w-0 opacity-0 hidden"
-                            : "w-auto opacity-100 block group-hover:translate-x-1 delay-150"
-                        )}
+                        title={isSidebarCollapsed ? item.name : ""}
                       >
-                        {item.name}
-                      </span>
-                    </Link>
+                        <div className="flex items-center">
+                          <item.icon className={cn("flex-shrink-0 transition-all", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5 mr-3", (isActive || isOpen) ? "text-primary" : "")} />
+                          <span className={cn("text-sm whitespace-nowrap transition-all duration-300", isSidebarCollapsed ? "w-0 opacity-0 hidden" : "w-auto opacity-100 block")}>
+                            {item.name}
+                          </span>
+                        </div>
+                        {/* Flecha de desplegable (solo visible si no está colapsado) */}
+                        {!isSidebarCollapsed && (
+                          <ChevronDownIcon className={cn("h-3 w-3 transition-transform duration-200", isOpen ? "rotate-180" : "")} />
+                        )}
+                      </button>
+                    ) : (
+                      // Si no tiene hijos, es un Link normal
+                      <Link
+                        href={item.href}
+                        onClick={() => setIsMobileOpen(false)}
+                        className={cn(
+                          "group flex items-center rounded-md transition-all duration-300 relative overflow-hidden",
+                          isSidebarCollapsed ? "justify-center p-2" : "px-3 py-2",
+                          isActive ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                        )}
+                        title={isSidebarCollapsed ? item.name : ""}
+                      >
+                        {isActive && !isSidebarCollapsed && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-primary rounded-r-full" />}
+                        <item.icon className={cn("flex-shrink-0 transition-all", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5 mr-3", isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground")} />
+                        <span className={cn("text-sm whitespace-nowrap transition-all duration-300", isSidebarCollapsed ? "w-0 opacity-0 hidden" : "w-auto opacity-100 block")}>
+                          {item.name}
+                        </span>
+                      </Link>
+                    )}
+
+                    {/* --- SUBMENÚ DESPLEGABLE --- */}
+                    {hasChildren && isOpen && !isSidebarCollapsed && (
+                      <div className="mt-1 ml-4 pl-2 border-l border-border space-y-1 animate-in slide-in-from-top-1 duration-200">
+                        {item.children!.map((subItem) => {
+                          const isSubActive = pathname === subItem.href.split('?')[0] && (!subItem.action || pathname.includes("action")); // Lógica simple
+                          return (
+                            <Link
+                              key={subItem.name}
+                              href={subItem.href}
+                              onClick={() => setIsMobileOpen(false)}
+                              className={cn(
+                                "flex items-center px-3 py-1.5 text-sm rounded-md transition-colors",
+                                isSubActive 
+                                  ? "text-primary font-medium bg-primary/5" 
+                                  : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                              )}
+                            >
+                              {subItem.icon && <subItem.icon className="h-4 w-4 mr-2 opacity-70" />}
+                              {subItem.name}
+                            </Link>
+                          )
+                        })}
+                      </div>
+                    )}
                   </li>
                 );
               })}
@@ -279,72 +321,35 @@ export function Sidebar() {
           </nav>
 
           {/* FOOTER */}
-          <div className="mt-auto border-t border-border px-3 pt-3 pb-2 space-y-1">
-            <div
-              className={cn(
-                "flex transition-all duration-500",
-                isSidebarCollapsed ? "justify-center mb-2" : "mb-1"
-              )}
-            >
+          <div className="mt-auto border-t border-border px-3 pt-3 pb-2 space-y-1 bg-card">
+            <div className={cn("flex transition-all duration-500", isSidebarCollapsed ? "justify-center mb-2" : "mb-1")}>
               <ThemeToggle showLabel={!isSidebarCollapsed} />
             </div>
 
             <Button
               variant="ghost"
               size="sm"
-              className={cn(
-                "w-full group text-muted-foreground hover:bg-destructive/10 hover:text-destructive h-9 transition-all duration-300",
-                isSidebarCollapsed ? "justify-center px-0" : "justify-start px-2"
-              )}
+              className={cn("w-full group text-muted-foreground hover:bg-destructive/10 hover:text-destructive h-9", isSidebarCollapsed ? "justify-center px-0" : "justify-start px-2")}
               onClick={handleLogout}
               title={isSidebarCollapsed ? "Cerrar Sesión" : ""}
             >
-              <ArrowLeftStartOnRectangleIcon
-                className={cn(
-                  "h-5 w-5 transition-transform duration-300 group-hover:-translate-x-1",
-                  isSidebarCollapsed ? "" : "mr-2"
-                )}
-              />
-              <span
-                className={cn(
-                  "text-sm whitespace-nowrap transition-all duration-300",
-                  isSidebarCollapsed
-                    ? "w-0 opacity-0 hidden"
-                    : "w-auto opacity-100 delay-150"
-                )}
-              >
-                Cerrar Sesión
-              </span>
+              <ArrowLeftStartOnRectangleIcon className={cn("h-5 w-5", isSidebarCollapsed ? "" : "mr-2")} />
+              <span className={cn("text-sm whitespace-nowrap", isSidebarCollapsed ? "hidden" : "block")}>Cerrar Sesión</span>
             </Button>
 
-            {/* PERFIL DE USUARIO CLICKABLE */}
             <div
-              onClick={() => user && setIsProfileModalOpen(true)} // Activa el modal
+              onClick={() => user && setIsProfileModalOpen(true)}
               className={cn(
-                "mt-2 flex items-center rounded-lg bg-secondary/50 border border-border transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)] cursor-pointer hover:bg-secondary hover:border-primary/30",
-                isSidebarCollapsed
-                  ? "justify-center p-1 h-10 w-10 mx-auto"
-                  : "p-2 gap-3"
+                "mt-2 flex items-center rounded-lg bg-secondary/50 border border-border cursor-pointer hover:bg-secondary hover:border-primary/30 transition-all",
+                isSidebarCollapsed ? "justify-center p-1 h-10 w-10 mx-auto" : "p-2 gap-3"
               )}
             >
-              <div className="h-8 w-8 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 flex flex-shrink-0 items-center justify-center text-xs font-bold text-white shadow-sm">
+              <div className="h-8 w-8 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 flex items-center justify-center text-xs font-bold text-white shadow-sm">
                 {initials}
               </div>
-
-              <div
-                className={cn(
-                  "overflow-hidden transition-all duration-300",
-                  isSidebarCollapsed
-                    ? "w-0 opacity-0 hidden"
-                    : "w-auto opacity-100 delay-200"
-                )}
-              >
-                <p className="text-xs font-semibold text-foreground truncate w-32">
-                  {displayName}
-                </p>
-                <p className="text-[10px] text-muted-foreground truncate w-32">
-                  {user?.email}
-                </p>
+              <div className={cn("overflow-hidden", isSidebarCollapsed ? "hidden" : "block")}>
+                <p className="text-xs font-semibold text-foreground truncate w-32">{displayName}</p>
+                <p className="text-[10px] text-muted-foreground truncate w-32">{user?.email}</p>
               </div>
             </div>
           </div>
@@ -353,11 +358,7 @@ export function Sidebar() {
 
       {/* MODAL DE PERFIL PROPIO */}
       {user && (
-        <Modal
-          isOpen={isProfileModalOpen}
-          onClose={() => setIsProfileModalOpen(false)}
-          title="Mi Perfil"
-        >
+        <Modal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} title="Mi Perfil">
           <UserProfileDetail user={user} />
         </Modal>
       )}

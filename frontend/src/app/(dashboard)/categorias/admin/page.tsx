@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAuthStore } from "@/store/authStore";
+import { useAuthStore } from "@/store/authStore"; // ✅ Importamos store
 import api from "@/lib/api";
 import { DataTable, ColumnDef } from "@/components/DataTable";
 import { Modal } from "@/components/Modal";
@@ -15,7 +15,9 @@ import {
   TrashIcon, 
   PlusIcon, 
   ArrowLeftIcon,
-  ExclamationTriangleIcon
+  ExclamationTriangleIcon,
+  ArrowPathIcon,
+  LockClosedIcon
 } from "@heroicons/react/24/outline";
 import { toast } from "sonner";
 
@@ -32,18 +34,18 @@ interface CategoryFormData {
 const initialFormData: CategoryFormData = { name: "" };
 
 export default function AdminCategoriasPage() {
-  const { token } = useAuthStore();
+  const { token, user } = useAuthStore(); // ✅ Obtenemos 'user' para verificar permisos
   const router = useRouter();
   
-  // Estados de datos
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Estados de Modales y Formularios
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  
   const [currentCategory, setCurrentCategory] = useState<Category | null>(null);
   const [formData, setFormData] = useState<CategoryFormData>(initialFormData);
+  const [targetCategoryId, setTargetCategoryId] = useState<string>(""); 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // --- CARGA DE DATOS ---
@@ -51,7 +53,6 @@ export default function AdminCategoriasPage() {
     try {
       setLoading(true);
       const res = await api.get<Category[]>("/categories/");
-      // Ordenar alfabéticamente
       const sorted = res.data.sort((a, b) => a.name.localeCompare(b.name));
       setCategories(sorted);
     } catch (err) {
@@ -82,6 +83,7 @@ export default function AdminCategoriasPage() {
 
   const handleOpenDelete = (category: Category) => {
     setCurrentCategory(category);
+    setTargetCategoryId(""); 
     setIsDeleteOpen(true);
   };
 
@@ -95,11 +97,9 @@ export default function AdminCategoriasPage() {
     setIsSubmitting(true);
     try {
       if (currentCategory) {
-        // EDITAR
         await api.put(`/categories/${currentCategory.id}`, formData);
         toast.success("Categoría actualizada");
       } else {
-        // CREAR
         await api.post("/categories/", formData);
         toast.success("Categoría creada");
       }
@@ -117,14 +117,24 @@ export default function AdminCategoriasPage() {
   const handleDelete = async () => {
     if (!currentCategory) return;
     setIsSubmitting(true);
+    
     try {
-      await api.delete(`/categories/${currentCategory.id}`);
-      toast.success("Categoría eliminada");
+      let url = `/categories/${currentCategory.id}`;
+      if (targetCategoryId) {
+        url += `?target_category_id=${targetCategoryId}`;
+      }
+
+      await api.delete(url);
+      
+      toast.success(targetCategoryId 
+        ? "Categoría eliminada y elementos reasignados." 
+        : "Categoría eliminada (elementos movidos a 'Otros')."
+      );
+      
       setIsDeleteOpen(false);
       fetchCategories();
     } catch (error: any) {
       console.error(error);
-      // El backend debe devolver 400 si tiene gastos asociados
       const msg = error.response?.data?.detail || "No se pudo eliminar";
       toast.error(msg);
     } finally {
@@ -155,31 +165,45 @@ export default function AdminCategoriasPage() {
     {
       header: "Acciones",
       className: "text-right w-32",
-      cell: (cat) => (
-        <div className="flex justify-end gap-2">
-          <button 
-            onClick={(e) => { e.stopPropagation(); handleOpenEdit(cat); }}
-            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
-            title="Editar Nombre"
-          >
-            <PencilSquareIcon className="h-4 w-4" />
-          </button>
-          <button 
-            onClick={(e) => { e.stopPropagation(); handleOpenDelete(cat); }}
-            className="p-1.5 text-red-600 hover:bg-red-50 rounded-md transition-colors"
-            title="Eliminar Categoría"
-          >
-            <TrashIcon className="h-4 w-4" />
-          </button>
-        </div>
-      )
+      cell: (cat) => {
+        // ✅ VALIDACIÓN DE PERMISOS
+        // Si NO es superuser, mostramos un candado o nada
+        if (!user?.is_superuser) {
+          return (
+            <div className="flex justify-end pr-2 opacity-30" title="Solo administradores">
+              <LockClosedIcon className="h-4 w-4" />
+            </div>
+          );
+        }
+
+        // Si ES superuser, mostramos las acciones completas
+        return (
+          <div className="flex justify-end gap-2">
+            <button 
+              onClick={(e) => { e.stopPropagation(); handleOpenEdit(cat); }}
+              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+              title="Editar Nombre"
+            >
+              <PencilSquareIcon className="h-4 w-4" />
+            </button>
+            <button 
+              onClick={(e) => { e.stopPropagation(); handleOpenDelete(cat); }}
+              className="p-1.5 text-red-600 hover:bg-red-50 rounded-md transition-colors"
+              title="Eliminar Categoría"
+            >
+              <TrashIcon className="h-4 w-4" />
+            </button>
+          </div>
+        );
+      }
     }
   ];
+
+  const availableCategories = categories.filter(c => c.id !== currentCategory?.id);
 
   return (
     <div className="p-6 space-y-6 max-w-5xl mx-auto animate-in fade-in duration-500">
       
-      {/* HEADER CON NAVEGACIÓN */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div className="space-y-1">
           <button 
@@ -195,12 +219,12 @@ export default function AdminCategoriasPage() {
             Crea, edita o elimina las categorías disponibles para gastos.
           </p>
         </div>
+        {/* Botón Crear disponible para todos */}
         <Button onClick={handleOpenCreate} className="gap-2 shadow-sm">
           <PlusIcon className="h-4 w-4" /> Nueva Categoría
         </Button>
       </div>
 
-      {/* CONTENEDOR PRINCIPAL (CARD) */}
       <Card>
         <CardHeader className="pb-3 border-b border-border mb-2">
           <CardTitle className="text-lg">Listado Maestro</CardTitle>
@@ -211,7 +235,6 @@ export default function AdminCategoriasPage() {
             data={categories} 
             isLoading={loading}
             emptyMessage="No hay categorías registradas."
-            // Opcional: detalle al hacer click
             renderDetailModal={(cat) => (
               <div className="space-y-4 text-center py-4">
                 <div className="mx-auto w-12 h-12 bg-primary/10 text-primary rounded-full flex items-center justify-center mb-2">
@@ -226,7 +249,6 @@ export default function AdminCategoriasPage() {
         </CardContent>
       </Card>
 
-      {/* --- MODAL: FORMULARIO --- */}
       <Modal
         isOpen={isFormOpen}
         onClose={() => setIsFormOpen(false)}
@@ -260,29 +282,49 @@ export default function AdminCategoriasPage() {
         </form>
       </Modal>
 
-      {/* --- MODAL: ELIMINAR --- */}
       <Modal
         isOpen={isDeleteOpen}
         onClose={() => setIsDeleteOpen(false)}
         title="Eliminar Categoría"
         className="max-w-md"
       >
-        <div className="space-y-4">
+        <div className="space-y-6">
           <div className="p-4 bg-red-50 dark:bg-red-900/20 text-red-900 dark:text-red-200 rounded-lg border border-red-200 dark:border-red-800 flex items-start gap-3">
             <ExclamationTriangleIcon className="h-6 w-6 flex-shrink-0 text-red-600" />
             <div>
-              <h4 className="font-bold">Acción Irreversible</h4>
+              <h4 className="font-bold">¿Estás seguro?</h4>
               <p className="text-sm mt-1 leading-relaxed">
-                ¿Estás seguro de eliminar la categoría <strong>{currentCategory?.name}</strong>?
-                <br/>
-                <span className="text-xs opacity-80 mt-1 block">
-                  Nota: Si existen gastos asociados a esta categoría, no podrás eliminarla hasta que los reasignes o borres.
-                </span>
+                Vas a eliminar <strong>{currentCategory?.name}</strong>. Esta acción no se puede deshacer.
               </p>
             </div>
           </div>
+
+          <div className="bg-secondary/10 p-4 rounded-lg border border-border space-y-3">
+            <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+              <ArrowPathIcon className="h-4 w-4 text-blue-500" />
+              Reasignar gastos existentes
+            </div>
+            
+            <div className="space-y-2">
+              <label className="text-xs text-muted-foreground block">
+                Si hay gastos usando esta categoría, ¿a cuál deberían moverse?
+              </label>
+              <select 
+                className="w-full p-2 text-sm rounded-md border border-border bg-background focus:ring-2 focus:ring-primary/50 outline-none"
+                value={targetCategoryId}
+                onChange={(e) => setTargetCategoryId(e.target.value)}
+              >
+                <option value="">Mover automáticamente a "Otros" (Por defecto)</option>
+                {availableCategories.map(cat => (
+                  <option key={cat.id} value={cat.id}>
+                    Mover a: {cat.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
           
-          <div className="flex justify-end gap-3 pt-2">
+          <div className="flex justify-end gap-3 pt-2 border-t border-border">
             <Button variant="outline" onClick={() => setIsDeleteOpen(false)}>
               Cancelar
             </Button>
@@ -292,7 +334,7 @@ export default function AdminCategoriasPage() {
               disabled={isSubmitting}
               className="bg-red-600 hover:bg-red-700 text-white"
             >
-              {isSubmitting ? "Eliminando..." : "Sí, Eliminar"}
+              {isSubmitting ? "Eliminando..." : "Confirmar Eliminación"}
             </Button>
           </div>
         </div>

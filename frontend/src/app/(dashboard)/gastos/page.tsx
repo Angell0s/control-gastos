@@ -1,13 +1,13 @@
-//frontend\src\app\gastos\page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation"; // ✅ 1. IMPORTAR
 import { useAuthStore } from "@/store/authStore";
 import api from "@/lib/api";
 import { DataTable, ColumnDef } from "@/components/DataTable";
 import { Modal } from "@/components/Modal";
 import { Button } from "@/components/ui/Button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { Card, CardContent } from "@/components/ui/Card";
 import { 
   BanknotesIcon, 
   PlusIcon, 
@@ -63,7 +63,9 @@ const initialForm: ExpenseFormData = {
 
 export default function GastosPage() {
   const { token } = useAuthStore();
-  
+  const searchParams = useSearchParams(); // ✅ 2. HOOKS DE NAVEGACIÓN
+  const router = useRouter();
+
   // Estados de Datos
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -98,15 +100,28 @@ export default function GastosPage() {
     if (token) fetchData();
   }, [token]);
 
+  // --- ✅ 3. DETECTAR ACCIÓN EN URL ---
+  useEffect(() => {
+    // Solo ejecutar si ya tenemos categorías cargadas (para inicializar el item correctamente)
+    if (searchParams.get("action") === "new" && !isFormOpen && categories.length > 0) {
+      handleOpenCreate();
+      // Limpiar la URL para que no se vuelva a abrir al recargar
+      router.replace("/gastos", { scroll: false });
+    }
+  }, [searchParams, categories]); // Dependencia categories importante
+
   // --- HANDLERS ---
 
   const handleOpenCreate = () => {
     setCurrentExpense(null);
     // Asegurarnos de tener al menos un ítem vacío y la fecha de hoy
+    // Usamos la primera categoría disponible si existe
+    const defaultCatId = categories.length > 0 ? categories[0].id : "";
+    
     setFormData({
       date: new Date().toISOString().split('T')[0],
       notes: "",
-      items: [{ ...initialItem, category_id: categories[0]?.id || "" }]
+      items: [{ ...initialItem, category_id: defaultCatId }]
     });
     setIsFormOpen(true);
   };
@@ -136,9 +151,10 @@ export default function GastosPage() {
   // --- LÓGICA DEL FORMULARIO DE ITEMS ---
   
   const addItemRow = () => {
+    const defaultCatId = categories.length > 0 ? categories[0].id : "";
     setFormData(prev => ({
       ...prev,
-      items: [...prev.items, { ...initialItem, category_id: categories[0]?.id || "" }]
+      items: [...prev.items, { ...initialItem, category_id: defaultCatId }]
     }));
   };
 
@@ -170,6 +186,13 @@ export default function GastosPage() {
       // Validaciones básicas
       if (formData.items.some(i => !i.name || i.amount <= 0)) {
         toast.warning("Revisa los ítems: Nombre y Monto son obligatorios.");
+        setIsSubmitting(false);
+        return;
+      }
+      
+      // Validar categorías
+      if (formData.items.some(i => !i.category_id)) {
+        toast.warning("Todos los ítems deben tener una categoría.");
         setIsSubmitting(false);
         return;
       }
@@ -245,13 +268,13 @@ export default function GastosPage() {
         <div className="flex justify-end gap-2">
           <button 
             onClick={(e) => { e.stopPropagation(); handleOpenEdit(exp); }}
-            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md"
+            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
           >
             <PencilSquareIcon className="h-4 w-4" />
           </button>
           <button 
             onClick={(e) => { e.stopPropagation(); handleOpenDelete(exp); }}
-            className="p-1.5 text-red-600 hover:bg-red-50 rounded-md"
+            className="p-1.5 text-red-600 hover:bg-red-50 rounded-md transition-colors"
           >
             <TrashIcon className="h-4 w-4" />
           </button>
@@ -325,7 +348,7 @@ export default function GastosPage() {
         <form onSubmit={handleSubmit} className="space-y-6">
           
           {/* CABECERA DEL FORMULARIO */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-secondary/10 p-4 rounded-lg">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-secondary/10 p-4 rounded-lg border border-border">
             <div className="space-y-2">
               <label className="text-sm font-medium flex items-center gap-2">
                 <CalendarIcon className="h-4 w-4" /> Fecha
@@ -333,7 +356,7 @@ export default function GastosPage() {
               <input 
                 type="date" 
                 required
-                className="w-full p-2 rounded border border-border bg-background"
+                className="w-full p-2 rounded border border-border bg-background focus:ring-2 focus:ring-primary/50 outline-none"
                 value={formData.date}
                 onChange={(e) => setFormData({...formData, date: e.target.value})}
               />
@@ -343,7 +366,7 @@ export default function GastosPage() {
               <input 
                 type="text" 
                 placeholder="Ej: Compras de la semana..."
-                className="w-full p-2 rounded border border-border bg-background"
+                className="w-full p-2 rounded border border-border bg-background focus:ring-2 focus:ring-primary/50 outline-none"
                 value={formData.notes}
                 onChange={(e) => setFormData({...formData, notes: e.target.value})}
               />
@@ -353,7 +376,7 @@ export default function GastosPage() {
           {/* LISTA DE ITEMS */}
           <div className="space-y-3">
             <div className="flex justify-between items-center">
-              <h4 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2">
+              <h4 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2 text-muted-foreground">
                 <ShoppingBagIcon className="h-4 w-4" /> Ítems de Compra
               </h4>
               <Button type="button" size="sm" variant="outline" onClick={addItemRow}>
@@ -380,6 +403,7 @@ export default function GastosPage() {
                         <input 
                           type="text" 
                           placeholder="Nombre..."
+                          required
                           className="w-full bg-transparent outline-none border-b border-transparent focus:border-primary"
                           value={item.name}
                           onChange={(e) => updateItem(idx, "name", e.target.value)}
@@ -389,8 +413,10 @@ export default function GastosPage() {
                         <select 
                           className="w-full bg-transparent outline-none text-xs"
                           value={item.category_id}
+                          required
                           onChange={(e) => updateItem(idx, "category_id", e.target.value)}
                         >
+                           {categories.length === 0 && <option value="">Sin categorías</option>}
                            {categories.map(cat => (
                              <option key={cat.id} value={cat.id}>{cat.name}</option>
                            ))}
@@ -399,7 +425,7 @@ export default function GastosPage() {
                       <td className="p-2 text-center">
                         <input 
                           type="number" min="1"
-                          className="w-12 text-center bg-transparent border rounded px-1"
+                          className="w-12 text-center bg-transparent border border-border rounded px-1"
                           value={item.quantity}
                           onChange={(e) => updateItem(idx, "quantity", parseInt(e.target.value) || 1)}
                         />
@@ -407,7 +433,7 @@ export default function GastosPage() {
                       <td className="p-2 text-right">
                         <input 
                           type="number" min="0" step="0.01"
-                          className="w-20 text-right bg-transparent border rounded px-1"
+                          className="w-24 text-right bg-transparent border border-border rounded px-1"
                           value={item.amount}
                           onChange={(e) => updateItem(idx, "amount", parseFloat(e.target.value) || 0)}
                         />
