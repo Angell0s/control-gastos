@@ -1,3 +1,4 @@
+//frontend\src\app\(dashboard)\bitacora\page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -21,7 +22,7 @@ interface AuditLog {
   source: string;
   details: string | null;
   timestamp: string;
-  // ✅ Nuevos campos del usuario (pueden ser null si el usuario fue borrado)
+  // Campos del usuario
   user_name?: string | null;
   user_email?: string | null;
   user_phone?: string | null;
@@ -50,7 +51,6 @@ export default function BitacoraPage() {
   const fetchLogs = async () => {
     try {
       setIsLoading(true);
-      // Usamos el endpoint GLOBAL para administradores
       const { data } = await api.get<AuditLog[]>("/users/logs/all");
       setLogs(data);
     } catch (error) {
@@ -77,10 +77,9 @@ export default function BitacoraPage() {
         </div>
       ),
     },
-    // ✅ NUEVA COLUMNA: USUARIO
     {
       header: "Usuario",
-      accessorKey: "user_email", // Key de respaldo
+      accessorKey: "user_email", // Key de respaldo para sort
       cell: (item) => (
         <div className="flex flex-col max-w-[180px]">
           <span className="font-medium text-foreground truncate">
@@ -96,12 +95,37 @@ export default function BitacoraPage() {
       header: "Acción",
       accessorKey: "action",
       type: "badge",
+      // ✅ AQUÍ AGREGAMOS TODOS LOS TIPOS DE ACCIONES
       badgeColors: {
+        // Accesos
         "login": "bg-green-100 text-green-800 border-green-200",
-        "login_silent": "bg-blue-100 text-blue-800 border-blue-200",
-        "unlink_telegram": "bg-red-100 text-red-800 border-red-200",
-        "create_expense": "bg-yellow-100 text-yellow-800 border-yellow-200",
+        "login_silent": "bg-gray-100 text-gray-600 border-gray-200",
+        "signup": "bg-green-100 text-green-800 border-green-200",
+        
+        // Telegram
+        "unlink_telegram": "bg-orange-100 text-orange-800 border-orange-200",
+        "unlink_telegram_failed": "bg-red-100 text-red-800 border-red-200",
+        
+        // Usuarios
         "create_user": "bg-purple-100 text-purple-800 border-purple-200",
+        "update_user": "bg-blue-100 text-blue-800 border-blue-200",
+        "update_profile": "bg-blue-50 text-blue-700 border-blue-100",
+        "delete_user": "bg-red-100 text-red-800 border-red-200",
+        
+        // Gastos
+        "create_expense": "bg-yellow-100 text-yellow-800 border-yellow-200",
+        "update_expense": "bg-yellow-50 text-yellow-700 border-yellow-100",
+        "delete_expense": "bg-red-50 text-red-700 border-red-100",
+        
+        // Categorías
+        "create_category": "bg-indigo-100 text-indigo-800 border-indigo-200",
+        "auto_create_category": "bg-indigo-50 text-indigo-600 border-indigo-100",
+        "update_category": "bg-indigo-50 text-indigo-700 border-indigo-100",
+        "delete_category": "bg-red-100 text-red-800 border-red-200",
+        "delete_category_failed": "bg-red-200 text-red-900 border-red-300",
+
+        // Errores genéricos / Accesos denegados
+        "access_denied": "bg-red-200 text-red-900 border-red-300",
       },
     },
     {
@@ -125,7 +149,7 @@ export default function BitacoraPage() {
     {
       header: "Resumen",
       accessorKey: "details",
-      className: "max-w-xs truncate hidden md:table-cell", // Ocultar en móviles pequeños
+      className: "max-w-xs truncate hidden md:table-cell",
       cell: (item) => (
         <span className="text-muted-foreground truncate block max-w-[200px]" title={item.details || ""}>
           {item.details || "Sin detalles adicionales"}
@@ -143,12 +167,12 @@ export default function BitacoraPage() {
           {getSourceIcon(log.source)}
         </div>
         <div>
-          <h4 className="font-bold text-lg text-foreground">{log.action}</h4>
+          <h4 className="font-bold text-lg text-foreground break-all">{log.action}</h4>
           <p className="text-xs text-muted-foreground font-mono uppercase tracking-wider">ID: {log.id}</p>
         </div>
       </div>
 
-      {/* ✅ SECCIÓN DE USUARIO (Card) */}
+      {/* SECCIÓN DE USUARIO (Card) */}
       <div className="bg-card rounded-lg border border-border overflow-hidden shadow-sm">
         <div className="bg-secondary/30 px-4 py-2 border-b border-border flex items-center gap-2">
           <UserCircleIcon className="h-4 w-4 text-primary" />
@@ -197,7 +221,7 @@ export default function BitacoraPage() {
           <dd className="mt-1 text-sm font-semibold">{log.source}</dd>
         </div>
 
-        {/* Detalles Completos (JSON o Texto) */}
+        {/* Detalles Completos */}
         <div className="col-span-1 sm:col-span-2 bg-accent/5 p-4 rounded-lg border border-border">
           <dt className="text-xs font-medium text-muted-foreground uppercase mb-2">Detalles del Evento</dt>
           <dd className="text-sm text-foreground whitespace-pre-wrap font-mono text-xs leading-relaxed">
@@ -218,7 +242,6 @@ export default function BitacoraPage() {
             Historial completo de accesos y acciones de todos los usuarios.
           </p>
         </div>
-        {/* Aquí podrías poner filtros o botón de exportar en el futuro */}
       </div>
 
       {/* Tabla */}
