@@ -43,18 +43,34 @@ def create_user(
         is_superuser=user_in.is_superuser,
     )
     db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
 
-    log_activity(
-        db=db,
-        user_id=current_user.id,
-        action="CREATE_USER",
-        source="WEB_APP",
-        details=f"Creó usuario {db_user.email}"
-    )
+    try:
+        db.commit()
+        db.refresh(db_user)
+
+        # ✅ LOG ÉXITO
+        log_activity(
+            db=db,
+            user_id=current_user.id,
+            action="CREATE_USER",
+            source="WEB_APP",
+            details=f"Creó usuario {db_user.email}"
+        )
+    except Exception as e:
+        db.rollback()
+        # ❌ LOG FALLO
+        try:
+            log_activity(
+                db=db, user_id=current_user.id, 
+                action="CREATE_USER_FAILED", source="WEB_APP", 
+                details=f"Falló creando {user_in.email}: {str(e)}"
+            )
+            db.commit()
+        except: pass
+        raise HTTPException(status_code=400, detail=f"Error creando usuario: {str(e)}")
 
     return db_user
+
 
 # 2. Registro público
 @router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -78,18 +94,28 @@ def register_user(
         is_superuser=False,
     )
     db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
 
-    log_activity(
-        db=db,
-        user_id=db_user.id,
-        action="SIGNUP",
-        source="WEB_APP",
-        details="Registro público"
-    )
+    try:
+        db.commit()
+        db.refresh(db_user)
+
+        # ✅ LOG ÉXITO
+        # Nota: Aquí usamos el ID del usuario recién creado porque ya existe tras el commit
+        log_activity(
+            db=db,
+            user_id=db_user.id,
+            action="SIGNUP",
+            source="WEB_APP",
+            details="Registro público exitoso"
+        )
+    except Exception as e:
+        db.rollback()
+        # Nota: En signup no logueamos el fallo en BD porque el usuario no existe 
+        # y no tenemos un user_id válido para la Foreign Key de AuditLog.
+        raise HTTPException(status_code=400, detail=f"Error en el registro: {str(e)}")
 
     return db_user
+
 
 # ========== READ (Leer) ==========
 
@@ -104,12 +130,14 @@ def read_users(
     users = db.query(User).offset(skip).limit(limit).all()
     return users
 
+
 # 4. Perfil propio
 @router.get("/me", response_model=UserResponse)
 def read_users_me(
     current_user: Annotated[User, Depends(get_current_user)]
 ):
     return current_user
+
 
 # 5. Obtener usuario por ID (Admin)
 @router.get("/{user_id}", response_model=UserResponseAdmin)
@@ -122,6 +150,7 @@ def read_user_by_id(
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     return user
+
 
 # ========== UPDATE (Actualizar) ==========
 
@@ -146,18 +175,34 @@ def update_user_me(
         setattr(current_user, field, value)
     
     db.add(current_user)
-    db.commit()
-    db.refresh(current_user)
+    
+    try:
+        db.commit()
+        db.refresh(current_user)
 
-    log_activity(
-        db=db,
-        user_id=current_user.id,
-        action="UPDATE_PROFILE",
-        source="WEB_APP",
-        details="Actualizó su perfil"
-    )
+        # ✅ LOG ÉXITO
+        log_activity(
+            db=db,
+            user_id=current_user.id,
+            action="UPDATE_PROFILE",
+            source="WEB_APP",
+            details="Actualizó su perfil"
+        )
+    except Exception as e:
+        db.rollback()
+        # ❌ LOG FALLO
+        try:
+            log_activity(
+                db=db, user_id=current_user.id, 
+                action="UPDATE_PROFILE_FAILED", source="WEB_APP", 
+                details=f"Error actualizando perfil: {str(e)}"
+            )
+            db.commit()
+        except: pass
+        raise HTTPException(status_code=400, detail=f"Error actualizando perfil: {str(e)}")
 
     return current_user
+
 
 # 7. Actualizar usuario (Admin)
 @router.put("/{user_id}", response_model=UserResponseAdmin)
@@ -184,18 +229,34 @@ def update_user(
         setattr(user, field, value)
     
     db.add(user)
-    db.commit()
-    db.refresh(user)
 
-    log_activity(
-        db=db,
-        user_id=current_user.id,
-        action="UPDATE_USER",
-        source="WEB_APP",
-        details=f"Actualizó usuario {user.email}"
-    )
+    try:
+        db.commit()
+        db.refresh(user)
+
+        # ✅ LOG ÉXITO
+        log_activity(
+            db=db,
+            user_id=current_user.id,
+            action="UPDATE_USER",
+            source="WEB_APP",
+            details=f"Actualizó usuario {user.email}"
+        )
+    except Exception as e:
+        db.rollback()
+        # ❌ LOG FALLO
+        try:
+            log_activity(
+                db=db, user_id=current_user.id, 
+                action="UPDATE_USER_FAILED", source="WEB_APP", 
+                details=f"Error actualizando usuario {user.email}: {str(e)}"
+            )
+            db.commit()
+        except: pass
+        raise HTTPException(status_code=400, detail=f"Error actualizando usuario: {str(e)}")
 
     return user
+
 
 # ========== DELETE (Eliminar) ==========
 
@@ -208,7 +269,7 @@ def delete_user(
     current_user: User = Depends(get_current_active_superuser)
 ):
     """
-    Desactiva un usuario (soft delete). Puedes cambiarlo a hard delete si prefieres.
+    Desactiva un usuario (soft delete).
     """
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -216,26 +277,49 @@ def delete_user(
     
     # Evitar que el admin se elimine a sí mismo
     if user.id == current_user.id:
+        # ❌ LOG INTENTO FALLIDO
+        try:
+            log_activity(
+                db=db, user_id=current_user.id, 
+                action="DELETE_USER_DENIED", source="WEB_APP", 
+                details="Intento de auto-eliminación"
+            )
+            db.commit()
+        except: pass
         raise HTTPException(status_code=400, detail="No puedes eliminarte a ti mismo")
     
-    # Soft Delete (Recomendado)
+    user_email = user.email # Guardar para el log
+
+    # Soft Delete
     user.is_active = False
     db.add(user)
     
-    # Hard Delete (Alternativa, descomenta si prefieres borrar permanentemente)
-    # db.delete(user)
-    
-    db.commit()
+    try:
+        db.commit()
 
-    log_activity(
-        db=db,
-        user_id=current_user.id,
-        action="DELETE_USER",
-        source="WEB_APP",
-        details=f"Eliminó/desactivó usuario {user.email}"
-    )
+        # ✅ LOG ÉXITO
+        log_activity(
+            db=db,
+            user_id=current_user.id,
+            action="DELETE_USER",
+            source="WEB_APP",
+            details=f"Eliminó/desactivó usuario {user_email}"
+        )
+    except Exception as e:
+        db.rollback()
+        # ❌ LOG FALLO
+        try:
+            log_activity(
+                db=db, user_id=current_user.id, 
+                action="DELETE_USER_FAILED", source="WEB_APP", 
+                details=f"Error eliminando {user_email}: {str(e)}"
+            )
+            db.commit()
+        except: pass
+        raise HTTPException(status_code=400, detail=f"Error eliminando usuario: {str(e)}")
 
     return None
+
 
 # ========== OTROS ==========
 
@@ -257,6 +341,7 @@ def read_user_logs(
     )
     return logs
 
+
 # 10. Bitácora completa (Admin)
 @router.get("/logs/all", response_model=List[AuditLogResponse])
 def read_all_logs(
@@ -275,6 +360,7 @@ def read_all_logs(
     )
     return logs
 
+
 # 11. Desvincular Telegram
 @router.post("/me/unlink-telegram", response_model=UserResponse)
 def unlink_telegram_web(
@@ -289,15 +375,30 @@ def unlink_telegram_web(
     current_user.phone = None
     
     db.add(current_user)
-    db.commit()
-    db.refresh(current_user)
     
-    log_activity(
-        db=db,
-        user_id=current_user.id,
-        action="UNLINK_TELEGRAM",
-        source="WEB_APP",
-        details=f"Desvinculación (Chat ID: {old_chat_id})"
-    )
+    try:
+        db.commit()
+        db.refresh(current_user)
+        
+        # ✅ LOG ÉXITO
+        log_activity(
+            db=db,
+            user_id=current_user.id,
+            action="UNLINK_TELEGRAM",
+            source="WEB_APP",
+            details=f"Desvinculación (Chat ID: {old_chat_id})"
+        )
+    except Exception as e:
+        db.rollback()
+        # ❌ LOG FALLO
+        try:
+            log_activity(
+                db=db, user_id=current_user.id, 
+                action="UNLINK_TELEGRAM_FAILED", source="WEB_APP", 
+                details=f"Error desvinculando: {str(e)}"
+            )
+            db.commit()
+        except: pass
+        raise HTTPException(status_code=400, detail=f"Error desvinculando: {str(e)}")
     
     return current_user
