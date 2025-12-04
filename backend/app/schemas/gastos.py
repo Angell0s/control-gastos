@@ -16,6 +16,7 @@ class CategoryUpdate(BaseModel):
 
 class CategoryResponse(CategoryBase):
     id: UUID
+    items_count: int = 0 
 
     class Config:
         from_attributes = True

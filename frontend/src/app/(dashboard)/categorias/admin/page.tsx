@@ -3,12 +3,13 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAuthStore } from "@/store/authStore"; // ✅ Importamos store
+import { useAuthStore } from "@/store/authStore";
 import api from "@/lib/api";
 import { DataTable, ColumnDef } from "@/components/DataTable";
 import { Modal } from "@/components/Modal";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { Switch } from "@headlessui/react"; // Si no tienes HeadlessUI, puedes usar un checkbox estilizado simple. Aquí uso una implementación manual con div.
 import { 
   TagIcon, 
   PencilSquareIcon, 
@@ -17,7 +18,10 @@ import {
   ArrowLeftIcon,
   ExclamationTriangleIcon,
   ArrowPathIcon,
-  LockClosedIcon
+  LockClosedIcon,
+  BanknotesIcon,
+  EyeIcon,
+  EyeSlashIcon
 } from "@heroicons/react/24/outline";
 import { toast } from "sonner";
 
@@ -25,6 +29,7 @@ import { toast } from "sonner";
 interface Category {
   id: string;
   name: string;
+  items_count: number; // ✅ Nuevo campo para el badge
 }
 
 interface CategoryFormData {
@@ -34,11 +39,14 @@ interface CategoryFormData {
 const initialFormData: CategoryFormData = { name: "" };
 
 export default function AdminCategoriasPage() {
-  const { token, user } = useAuthStore(); // ✅ Obtenemos 'user' para verificar permisos
+  const { token, user } = useAuthStore();
   const router = useRouter();
   
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // ✅ ESTADO PARA EL SWITCH DE ADMIN
+  const [isAdminView, setIsAdminView] = useState(false);
 
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
@@ -52,7 +60,14 @@ export default function AdminCategoriasPage() {
   const fetchCategories = async () => {
     try {
       setLoading(true);
-      const res = await api.get<Category[]>("/categories/");
+      // ✅ LÓGICA DE SWITCH DE ENDPOINT
+      // Si isAdminView es true y es superuser, usamos el endpoint de admin.
+      // Si no, usamos el normal.
+      const endpoint = (isAdminView && user?.is_superuser) 
+        ? "/categories/admin/all" 
+        : "/categories/";
+
+      const res = await api.get<Category[]>(endpoint);
       const sorted = res.data.sort((a, b) => a.name.localeCompare(b.name));
       setCategories(sorted);
     } catch (err) {
@@ -65,10 +80,10 @@ export default function AdminCategoriasPage() {
 
   useEffect(() => {
     if (token) fetchCategories();
-  }, [token]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, isAdminView]); // Recargar si cambia el token o el modo de vista
 
   // --- HANDLERS ---
-
   const handleOpenCreate = () => {
     setCurrentCategory(null);
     setFormData(initialFormData);
@@ -145,29 +160,42 @@ export default function AdminCategoriasPage() {
   // --- COLUMNAS ---
   const columns: ColumnDef<Category>[] = [
     {
-      header: "Nombre de Categoría",
+      header: "Categoría",
       accessorKey: "name",
       cell: (cat) => (
-        <div className="flex items-center gap-3 font-medium text-foreground">
-          <div className="p-1.5 bg-primary/10 rounded text-primary">
-            <TagIcon className="h-4 w-4" />
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-3 font-medium text-foreground">
+            <div className="p-1.5 bg-primary/10 rounded text-primary">
+              <TagIcon className="h-4 w-4" />
+            </div>
+            {cat.name}
           </div>
-          {cat.name}
+
+          {/* ✅ BADGE DE ITEMS (Dinámico según la vista) */}
+          <span className={`
+            text-[10px] px-2 py-0.5 rounded-full font-medium border flex items-center gap-1 w-fit
+            ${cat.items_count > 0 
+              ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800" 
+              : "bg-gray-50 text-gray-400 border-gray-200 dark:bg-gray-800 dark:text-gray-500 dark:border-gray-700"
+            }
+          `}>
+            <BanknotesIcon className="h-3 w-3" />
+            {cat.items_count}
+          </span>
         </div>
       )
     },
     {
       header: "ID Sistema",
       accessorKey: "id",
-      className: "text-muted-foreground text-xs font-mono w-32 truncate",
+      className: "text-muted-foreground text-xs font-mono w-24 sm:w-32 truncate hidden sm:table-cell",
       cell: (cat) => cat.id.slice(0, 8)
     },
     {
       header: "Acciones",
-      className: "text-right w-32",
+      className: "text-right w-28",
       cell: (cat) => {
-        // ✅ VALIDACIÓN DE PERMISOS
-        // Si NO es superuser, mostramos un candado o nada
+        // Validación de permisos
         if (!user?.is_superuser) {
           return (
             <div className="flex justify-end pr-2 opacity-30" title="Solo administradores">
@@ -176,7 +204,6 @@ export default function AdminCategoriasPage() {
           );
         }
 
-        // Si ES superuser, mostramos las acciones completas
         return (
           <div className="flex justify-end gap-2">
             <button 
@@ -204,8 +231,8 @@ export default function AdminCategoriasPage() {
   return (
     <div className="p-6 space-y-6 max-w-5xl mx-auto animate-in fade-in duration-500">
       
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div className="space-y-1">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
+        <div className="space-y-1 w-full sm:w-auto">
           <button 
             onClick={() => router.back()} 
             className="flex items-center gap-1 text-sm text-muted-foreground hover:text-primary transition-colors mb-2"
@@ -216,18 +243,51 @@ export default function AdminCategoriasPage() {
             Administrar Categorías
           </h1>
           <p className="text-muted-foreground text-sm">
-            Crea, edita o elimina las categorías disponibles para gastos.
+            Gestiona las categorías disponibles para gastos.
           </p>
         </div>
-        {/* Botón Crear disponible para todos */}
-        <Button onClick={handleOpenCreate} className="gap-2 shadow-sm">
-          <PlusIcon className="h-4 w-4" /> Nueva Categoría
-        </Button>
+        
+        {/* CONTROLES SUPERIORES */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full sm:w-auto">
+          
+          {/* ✅ SWITCH DE VISTA ADMIN (Solo visible para SuperUser) */}
+          {user?.is_superuser && (
+            <div 
+              className="flex items-center gap-2 px-3 py-2 bg-secondary/20 rounded-lg border border-border cursor-pointer select-none hover:bg-secondary/30 transition-colors"
+              onClick={() => setIsAdminView(!isAdminView)}
+            >
+              <div className={`w-8 h-4 rounded-full relative transition-colors ${isAdminView ? 'bg-primary' : 'bg-gray-300'}`}>
+                <div className={`w-3 h-3 bg-white rounded-full absolute top-0.5 transition-transform ${isAdminView ? 'left-4.5 translate-x-4' : 'left-0.5 translate-x-0'}`} />
+              </div>
+              <span className="text-xs font-medium flex items-center gap-1.5">
+                {isAdminView ? (
+                  <>
+                    <EyeIcon className="h-3 w-3 text-primary" /> 
+                    Vista Global
+                  </>
+                ) : (
+                  <>
+                    <EyeSlashIcon className="h-3 w-3 text-muted-foreground" /> 
+                    Vista Personal
+                  </>
+                )}
+              </span>
+            </div>
+          )}
+
+          <Button onClick={handleOpenCreate} className="gap-2 shadow-sm w-full sm:w-auto">
+            <PlusIcon className="h-4 w-4" /> Nueva
+          </Button>
+        </div>
       </div>
 
       <Card>
-        <CardHeader className="pb-3 border-b border-border mb-2">
+        <CardHeader className="pb-3 border-b border-border mb-2 flex flex-row justify-between items-center">
           <CardTitle className="text-lg">Listado Maestro</CardTitle>
+          {/* Info badge del modo actual */}
+          <span className="text-xs text-muted-foreground font-normal bg-muted px-2 py-1 rounded">
+            {isAdminView ? "Mostrando conteo total (Global)" : "Mostrando solo tus items (Personal)"}
+          </span>
         </CardHeader>
         <CardContent className="p-0 sm:p-0">
           <DataTable 
@@ -241,7 +301,11 @@ export default function AdminCategoriasPage() {
                   <TagIcon className="h-6 w-6" />
                 </div>
                 <h3 className="text-xl font-bold">{cat.name}</h3>
-                <p className="text-xs text-muted-foreground font-mono">UUID: {cat.id}</p>
+                <div className="flex justify-center gap-4 text-sm text-muted-foreground">
+                   <span>ID: {cat.id.slice(0,8)}</span>
+                   <span>•</span>
+                   <span>{cat.items_count} elementos asociados</span>
+                </div>
               </div>
             )}
             modalTitle="Detalle de Categoría"
@@ -249,6 +313,7 @@ export default function AdminCategoriasPage() {
         </CardContent>
       </Card>
 
+      {/* --- MODAL DE CREAR/EDITAR --- */}
       <Modal
         isOpen={isFormOpen}
         onClose={() => setIsFormOpen(false)}
@@ -257,31 +322,24 @@ export default function AdminCategoriasPage() {
       >
         <form onSubmit={handleSubmit} className="space-y-4 pt-2">
           <div className="space-y-2">
-            <label className="text-sm font-medium">Nombre de la Categoría</label>
+            <label className="text-sm font-medium">Nombre</label>
             <input 
               type="text" 
               autoFocus
-              placeholder="Ej: Alimentos, Transporte..."
+              placeholder="Ej: Alimentos"
               className="w-full p-2.5 rounded-md border border-border bg-background focus:ring-2 focus:ring-primary/50 outline-none transition-all"
               value={formData.name}
               onChange={(e) => setFormData({ name: e.target.value })}
             />
-            <p className="text-xs text-muted-foreground">
-              Este nombre aparecerá en los reportes y selectores de gastos.
-            </p>
           </div>
-
           <div className="flex justify-end gap-3 pt-4 border-t border-border mt-6">
-            <Button type="button" variant="outline" onClick={() => setIsFormOpen(false)}>
-              Cancelar
-            </Button>
-            <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? "Guardando..." : "Guardar"}
-            </Button>
+            <Button type="button" variant="outline" onClick={() => setIsFormOpen(false)}>Cancelar</Button>
+            <Button type="submit" disabled={isSubmitting}>{isSubmitting ? "Guardando..." : "Guardar"}</Button>
           </div>
         </form>
       </Modal>
 
+      {/* --- MODAL DE ELIMINAR --- */}
       <Modal
         isOpen={isDeleteOpen}
         onClose={() => setIsDeleteOpen(false)}
@@ -292,9 +350,14 @@ export default function AdminCategoriasPage() {
           <div className="p-4 bg-red-50 dark:bg-red-900/20 text-red-900 dark:text-red-200 rounded-lg border border-red-200 dark:border-red-800 flex items-start gap-3">
             <ExclamationTriangleIcon className="h-6 w-6 flex-shrink-0 text-red-600" />
             <div>
-              <h4 className="font-bold">¿Estás seguro?</h4>
+              <h4 className="font-bold">Atención</h4>
               <p className="text-sm mt-1 leading-relaxed">
-                Vas a eliminar <strong>{currentCategory?.name}</strong>. Esta acción no se puede deshacer.
+                Vas a eliminar <strong>{currentCategory?.name}</strong>.
+                {isAdminView && (
+                  <span className="block mt-1 font-semibold text-red-700 dark:text-red-300">
+                    ⚠️ Estás en modo admin: Esto afectará a TODOS los usuarios.
+                  </span>
+                )}
               </p>
             </div>
           </div>
@@ -302,19 +365,19 @@ export default function AdminCategoriasPage() {
           <div className="bg-secondary/10 p-4 rounded-lg border border-border space-y-3">
             <div className="flex items-center gap-2 text-sm font-medium text-foreground">
               <ArrowPathIcon className="h-4 w-4 text-blue-500" />
-              Reasignar gastos existentes
+              Reasignación de gastos
             </div>
             
             <div className="space-y-2">
               <label className="text-xs text-muted-foreground block">
-                Si hay gastos usando esta categoría, ¿a cuál deberían moverse?
+                Destino para los {currentCategory?.items_count} ítems afectados:
               </label>
               <select 
                 className="w-full p-2 text-sm rounded-md border border-border bg-background focus:ring-2 focus:ring-primary/50 outline-none"
                 value={targetCategoryId}
                 onChange={(e) => setTargetCategoryId(e.target.value)}
               >
-                <option value="">Mover automáticamente a "Otros" (Por defecto)</option>
+                <option value="">Mover a "Otros" (Automático)</option>
                 {availableCategories.map(cat => (
                   <option key={cat.id} value={cat.id}>
                     Mover a: {cat.name}
@@ -325,16 +388,9 @@ export default function AdminCategoriasPage() {
           </div>
           
           <div className="flex justify-end gap-3 pt-2 border-t border-border">
-            <Button variant="outline" onClick={() => setIsDeleteOpen(false)}>
-              Cancelar
-            </Button>
-            <Button 
-              variant="destructive" 
-              onClick={handleDelete} 
-              disabled={isSubmitting}
-              className="bg-red-600 hover:bg-red-700 text-white"
-            >
-              {isSubmitting ? "Eliminando..." : "Confirmar Eliminación"}
+            <Button variant="outline" onClick={() => setIsDeleteOpen(false)}>Cancelar</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={isSubmitting}>
+              {isSubmitting ? "Eliminando..." : "Confirmar"}
             </Button>
           </div>
         </div>
