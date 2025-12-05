@@ -14,11 +14,10 @@ import {
   PlusIcon, 
   TrashIcon, 
   PencilSquareIcon, 
-  CalendarIcon, 
   BriefcaseIcon, 
-  DocumentTextIcon,
   XMarkIcon,
-  TagIcon
+  TagIcon,
+  ExclamationTriangleIcon // ✅ Importado para la advertencia
 } from "@heroicons/react/24/outline";
 import { toast } from "sonner";
 
@@ -34,6 +33,8 @@ interface IngresoItem {
   category_id: string;
   descripcion: string;
   monto: number;
+  // ✅ Campo temporal para crear categoría
+  new_category_name?: string; 
 }
 
 interface Ingreso {
@@ -53,9 +54,10 @@ interface IngresoFormData {
 }
 
 const initialItem: IngresoItem = {
-  category_id: "", // Inicia vacío explícitamente
+  category_id: "", 
   descripcion: "",
-  monto: 0
+  monto: 0,
+  new_category_name: ""
 };
 
 const initialForm: IngresoFormData = {
@@ -64,6 +66,9 @@ const initialForm: IngresoFormData = {
   fuente: "",
   items: [{ ...initialItem }]
 };
+
+// ID ficticio para identificar la acción de crear nueva
+const NEW_CATEGORY_OPTION_ID = "NEW_CATEGORY_OPTION";
 
 export default function IngresosPage() {
   const { token } = useAuthStore();
@@ -74,8 +79,14 @@ export default function IngresosPage() {
   const [ingresos, setIngresos] = useState<Ingreso[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // Estados UI
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  
+  // ✅ Estado para modal de confirmación de creación de categoría
+  const [isCategoryConfirmOpen, setIsCategoryConfirmOpen] = useState(false);
+  
   const [currentIngreso, setCurrentIngreso] = useState<Ingreso | null>(null);
   const [formData, setFormData] = useState<IngresoFormData>(initialForm);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -89,7 +100,6 @@ export default function IngresosPage() {
         api.get<Category[]>("/categories/")
       ]);
       setIngresos(resIngresos.data);
-      // Ordenar categorías alfabéticamente para facilitar búsqueda
       setCategories(resCats.data.sort((a, b) => a.name.localeCompare(b.name)));
     } catch (err) {
       console.error(err);
@@ -110,7 +120,6 @@ export default function IngresosPage() {
       handleOpenCreate();
       router.replace("/ingresos", { scroll: false });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [action]);
 
   // --- HANDLERS ---
@@ -136,7 +145,8 @@ export default function IngresosPage() {
         id: i.id,
         category_id: i.category_id,
         descripcion: i.descripcion,
-        monto: i.monto
+        monto: i.monto,
+        new_category_name: ""
       }))
     });
     setIsFormOpen(true);
@@ -150,7 +160,6 @@ export default function IngresosPage() {
   // --- LÓGICA DE ITEMS ---
   
   const addItemRow = () => {
-    // Al agregar nuevo item, iniciamos vacío (sin copiar categoría anterior para obligar elección consciente o default)
     setFormData(prev => ({
       ...prev,
       items: [...prev.items, { ...initialItem }]
@@ -167,6 +176,12 @@ export default function IngresosPage() {
 
   const updateItem = (index: number, field: keyof IngresoItem, value: any) => {
     const newItems = [...formData.items];
+
+    // Lógica especial para resetear new_category_name si cambian a una categoría existente
+    if (field === "category_id" && value !== NEW_CATEGORY_OPTION_ID) {
+        newItems[index].new_category_name = "";
+    }
+
     // @ts-ignore
     newItems[index] = { ...newItems[index], [field]: value };
     setFormData(prev => ({ ...prev, items: newItems }));
@@ -176,64 +191,123 @@ export default function IngresosPage() {
     return formData.items.reduce((acc, item) => acc + (item.monto || 0), 0);
   };
 
-  // --- SUBMIT ---
+  // --- SUBMIT E INTERCEPCIÓN (Igual que Gastos) ---
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // 1. Interceptor del Submit
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Validaciones básicas
+    if (!formData.descripcion) {
+        toast.warning("La descripción general es obligatoria.");
+        return;
+    }
+    
+    // Verificar si hay categorías nuevas pendientes
+    const hasNewCategories = formData.items.some(
+        item => item.category_id === NEW_CATEGORY_OPTION_ID && item.new_category_name?.trim()
+    );
+
+    if (hasNewCategories) {
+        // Si hay nuevas, detenemos el proceso y pedimos confirmación
+        setIsCategoryConfirmOpen(true);
+    } else {
+        // Si no hay nuevas, procedemos directo
+        processFinalSubmit();
+    }
+  };
+
+  // 2. Proceso real de guardado
+  const processFinalSubmit = async () => {
     setIsSubmitting(true);
+    setIsCategoryConfirmOpen(false);
 
     try {
-      if (!formData.descripcion) {
-        toast.warning("La descripción general es obligatoria.");
-        setIsSubmitting(false);
-        return;
-      }
+        // A. Crear categorías nuevas si existen
+        const itemsToProcess = [...formData.items];
+        const newCategoriesMap = new Map<string, string>(); // nombre -> id_real
 
-      const itemsProcessed = formData.items.map(item => {
-        if (formData.items.length === 1 && !item.descripcion.trim()) {
-          return { ...item, descripcion: formData.descripcion };
+        // Nombres únicos
+        const uniqueNewNames = Array.from(new Set(
+            itemsToProcess
+                .filter(i => i.category_id === NEW_CATEGORY_OPTION_ID && i.new_category_name)
+                .map(i => i.new_category_name!.trim())
+        ));
+
+        // Creamos las categorías
+        for (const catName of uniqueNewNames) {
+            try {
+                const res = await api.post<Category>("/categories/", { name: catName });
+                newCategoriesMap.set(catName, res.data.id);
+                setCategories(prev => [...prev, res.data].sort((a, b) => a.name.localeCompare(b.name)));
+            } catch (err) {
+                console.error(`Error creando categoría ${catName}`, err);
+                toast.error(`Error al crear categoría "${catName}".`);
+                setIsSubmitting(false);
+                return;
+            }
         }
-        return item;
-      });
 
-      if (itemsProcessed.some(i => !i.descripcion.trim())) {
-        toast.warning("Describe cada concepto.");
-        setIsSubmitting(false);
-        return;
-      }
-      if (itemsProcessed.some(i => i.monto <= 0)) {
-        toast.warning("El monto debe ser mayor a 0.");
-        setIsSubmitting(false);
-        return;
-      }
-      
-      // Validación de categoría relajada:
-      // Si no selecciona, el backend asignará "Otros".
-      // Solo validamos si explícitamente quieres obligar al usuario, 
-      // pero según tu requerimiento "si no, que se vaya vacío", lo dejamos pasar.
+        // B. Reemplazar IDs temporales
+        const itemsProcessed = itemsToProcess.map(item => {
+            // Lógica de descripción vacía si es único item
+            let updatedItem = { ...item };
+            if (itemsToProcess.length === 1 && !updatedItem.descripcion.trim()) {
+                updatedItem.descripcion = formData.descripcion;
+            }
 
-      const payload = {
-        ...formData,
-        items: itemsProcessed,
-        fecha: new Date(formData.fecha).toISOString(),
-        fuente: formData.fuente.trim() === "" ? null : formData.fuente
-      };
+            // Lógica de categoría nueva
+            if (updatedItem.category_id === NEW_CATEGORY_OPTION_ID && updatedItem.new_category_name) {
+                const realId = newCategoriesMap.get(updatedItem.new_category_name.trim());
+                if (realId) {
+                    updatedItem.category_id = realId;
+                    updatedItem.new_category_name = undefined;
+                }
+            }
+            return updatedItem;
+        });
 
-      if (currentIngreso) {
-        await api.put(`/incomes/${currentIngreso.id}`, payload);
-        toast.success("Ingreso actualizado");
-      } else {
-        await api.post("/incomes/", payload);
-        toast.success("Ingreso registrado");
-      }
+        // Validaciones finales de items
+        if (itemsProcessed.some(i => !i.descripcion.trim())) {
+            toast.warning("Describe cada concepto.");
+            setIsSubmitting(false);
+            return;
+        }
+        if (itemsProcessed.some(i => i.monto <= 0)) {
+            toast.warning("El monto debe ser mayor a 0.");
+            setIsSubmitting(false);
+            return;
+        }
+        if (itemsProcessed.some(i => i.category_id === NEW_CATEGORY_OPTION_ID)) {
+            toast.error("Error interno asignando categorías.");
+            setIsSubmitting(false);
+            return;
+        }
 
-      setIsFormOpen(false);
-      fetchData();
+        // C. Guardar Ingreso
+        const payload = {
+            ...formData,
+            items: itemsProcessed,
+            fecha: new Date(formData.fecha).toISOString(),
+            fuente: formData.fuente.trim() === "" ? null : formData.fuente
+        };
+
+        if (currentIngreso) {
+            await api.put(`/incomes/${currentIngreso.id}`, payload);
+            toast.success("Ingreso actualizado");
+        } else {
+            await api.post("/incomes/", payload);
+            toast.success("Ingreso y categorías registrados");
+        }
+
+        setIsFormOpen(false);
+        fetchData();
+
     } catch (error: any) {
-      console.error(error);
-      toast.error("Error al guardar ingreso");
+        console.error(error);
+        toast.error("Error al guardar ingreso");
     } finally {
-      setIsSubmitting(false);
+        setIsSubmitting(false);
     }
   };
 
@@ -350,14 +424,14 @@ export default function IngresosPage() {
         </CardContent>
       </Card>
 
-      {/* --- MODAL FORMULARIO OPTIMIZADO --- */}
+      {/* --- MODAL FORMULARIO --- */}
       <Modal
         isOpen={isFormOpen}
         onClose={() => setIsFormOpen(false)}
         title={currentIngreso ? "Editar Ingreso" : "Nuevo Ingreso"}
         className="max-w-xl"
       >
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <form onSubmit={handleFormSubmit} className="space-y-5">
           
           {/* DATOS GENERALES */}
           <div className="grid grid-cols-2 gap-4">
@@ -395,7 +469,7 @@ export default function IngresosPage() {
             </div>
           </div>
 
-          {/* ÁREA DE CONCEPTOS (SMART CARDS) */}
+          {/* ÁREA DE CONCEPTOS */}
           <div className="space-y-3 bg-slate-50 dark:bg-white/5 p-4 rounded-lg border border-slate-100 dark:border-white/10">
             
             <div className="flex justify-between items-end mb-2">
@@ -426,15 +500,18 @@ export default function IngresosPage() {
                         </div>
                     )}
 
-                    {/* INPUT DE MONTO GIGANTE */}
+                    {/* INPUT DE MONTO (Hint 0.00) */}
                     <div className={`relative ${formData.items.length === 1 ? "flex-1" : "w-32"}`}>
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg">$</span>
                         <input 
                             type="number" min="0" step="0.01"
                             placeholder="0.00"
                             className="w-full pl-8 pr-3 py-2 text-right text-xl font-bold text-slate-700 dark:text-white bg-slate-50 dark:bg-slate-800/50 rounded-md outline-none focus:ring-2 focus:ring-green-500/20 transition-all placeholder:text-slate-300 dark:placeholder:text-slate-600"
-                            value={item.monto || ""}
-                            onChange={(e) => updateItem(idx, "monto", parseFloat(e.target.value))}
+                            value={item.monto === 0 ? "" : item.monto}
+                            onChange={(e) => {
+                                const val = e.target.value;
+                                updateItem(idx, "monto", val === "" ? 0 : parseFloat(val));
+                            }}
                         />
                     </div>
 
@@ -450,17 +527,36 @@ export default function IngresosPage() {
                     )}
                 </div>
 
-                {/* SELECTOR DE CATEGORÍA (Visible siempre ahora) */}
-                <div className="w-full flex items-center gap-2 px-1">
-                    <TagIcon className="h-3 w-3 text-slate-400" />
-                    <select 
-                        className="flex-1 text-xs text-slate-600 dark:text-slate-300 bg-transparent outline-none cursor-pointer [&>option]:bg-white [&>option]:text-black dark:[&>option]:bg-slate-900 dark:[&>option]:text-white border-none focus:ring-0 py-0 pl-0"
-                        value={item.category_id}
-                        onChange={(e) => updateItem(idx, "category_id", e.target.value)}
-                    >
-                        <option value="">Sin categoría (Se asignará 'Otros')</option>
-                        {categories.map(cat => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
-                    </select>
+                {/* SELECTOR DE CATEGORÍA CON CREACIÓN CONDICIONAL */}
+                <div className="w-full flex flex-col px-1">
+                    <div className="flex items-center gap-2">
+                        <TagIcon className="h-3 w-3 text-slate-400" />
+                        <select 
+                            className="flex-1 text-xs text-slate-600 dark:text-slate-300 bg-transparent outline-none cursor-pointer [&>option]:bg-white [&>option]:text-black dark:[&>option]:bg-slate-900 dark:[&>option]:text-white border-none focus:ring-0 py-0 pl-0"
+                            value={item.category_id}
+                            onChange={(e) => updateItem(idx, "category_id", e.target.value)}
+                        >
+                            <option value="">Sin categoría (Se asignará 'Otros')</option>
+                            <option disabled>──────────</option>
+                            <option value={NEW_CATEGORY_OPTION_ID} className="font-bold text-green-600">✨ + Nueva Categoría</option>
+                            <option disabled>──────────</option>
+                            {categories.map(cat => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
+                        </select>
+                    </div>
+
+                    {/* INPUT CONDICIONAL PARA NOMBRE NUEVA CATEGORÍA */}
+                    {item.category_id === NEW_CATEGORY_OPTION_ID && (
+                         <div className="mt-2 pl-5">
+                            <input 
+                              type="text"
+                              autoFocus
+                              placeholder="Nombre nueva categoría..."
+                              className="text-xs w-full p-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded text-yellow-800 dark:text-yellow-200 placeholder:text-yellow-800/50 outline-none animate-in slide-in-from-top-1 duration-200"
+                              value={item.new_category_name}
+                              onChange={(e) => updateItem(idx, "new_category_name", e.target.value)}
+                            />
+                         </div>
+                    )}
                 </div>
 
               </div>
@@ -488,6 +584,43 @@ export default function IngresosPage() {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* --- MODAL CONFIRMACIÓN DE NUEVA CATEGORÍA --- */}
+      <Modal
+        isOpen={isCategoryConfirmOpen}
+        onClose={() => setIsCategoryConfirmOpen(false)}
+        title="Crear Nuevas Categorías"
+        className="max-w-md border-l-4 border-l-yellow-500"
+      >
+        <div className="space-y-4">
+            <div className="flex items-start gap-3 bg-yellow-50 dark:bg-yellow-900/20 p-3 rounded-lg text-yellow-800 dark:text-yellow-200 text-sm">
+              <ExclamationTriangleIcon className="h-5 w-5 shrink-0" />
+              <p>Estás a punto de crear nuevas categorías en el sistema global. Esta acción <strong>solo puede ser revertida por un administrador</strong>.</p>
+            </div>
+
+            <p className="text-sm font-medium">Se crearán las siguientes categorías:</p>
+            <ul className="list-disc list-inside text-sm text-muted-foreground bg-muted p-3 rounded-md">
+              {Array.from(new Set(
+                  formData.items
+                    .filter(i => i.category_id === NEW_CATEGORY_OPTION_ID && i.new_category_name?.trim())
+                    .map(i => i.new_category_name)
+              )).map((name, i) => (
+                  <li key={i}>{name}</li>
+              ))}
+            </ul>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <Button variant="outline" onClick={() => setIsCategoryConfirmOpen(false)}>Revisar</Button>
+              <Button 
+                className="bg-yellow-600 hover:bg-yellow-700 text-white" 
+                onClick={processFinalSubmit} 
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? "Creando..." : "Confirmar y Guardar"}
+              </Button>
+            </div>
+        </div>
       </Modal>
 
       {/* MODAL ELIMINAR */}
