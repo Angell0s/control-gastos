@@ -4,10 +4,10 @@ from datetime import timedelta
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
-from sqlalchemy.orm import Session 
+from sqlalchemy import select, and_
+from sqlalchemy.ext.asyncio import AsyncSession 
 
-from app.db.session import get_db
+from app.api.deps import get_db # Importa el get_db asíncrono (deps.py)
 from app.models.user import User
 from app.core import security
 from app.core.config import settings
@@ -20,7 +20,7 @@ from app.schemas.telegram import (
 from app.services.audit import log_activity 
 
 def normalize_phone(phone: str | None) -> str | None:
-    """Normaliza cualquier número mexicano → formato E.164 sin '+' (ej: 528468996046)"""
+    """Normaliza cualquier número mexicano -> formato E.164 sin '+' (ej: 528468996046)"""
     if not phone: return None
     digits = re.sub(r"\D", "", phone.strip())
     if digits.startswith(("044", "045")): digits = digits[3:]
@@ -34,9 +34,9 @@ def normalize_phone(phone: str | None) -> str | None:
 router = APIRouter(tags=["telegram"])
 
 @router.post("/check-phone")
-def check_phone_exists(
+async def check_phone_exists(
     data: TelegramAuthStep1,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ) -> dict[str, bool]:
     raw_phone = data.phone.strip() if data.phone else ""
     phone_normalized = normalize_phone(raw_phone)
@@ -45,7 +45,9 @@ def check_phone_exists(
     if not phone_normalized:
         return {"exists": False}
     
-    user = db.scalar(select(User).where(User.phone == phone_normalized))
+    stmt = select(User).where(User.phone == phone_normalized)
+    result = await db.execute(stmt)
+    user = result.scalars().first()
     
     if user:
         print(f"✅ Usuario encontrado: {user.email}")
@@ -54,10 +56,11 @@ def check_phone_exists(
     print("❌ Teléfono no encontrado en BD")
     return {"exists": False}
 
+
 @router.post("/login-secure", response_model=TelegramAuthResponse)
-def login_telegram_secure(
+async def login_telegram_secure(
     data: TelegramAuthStep2,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ) -> TelegramAuthResponse:
     phone_normalized = normalize_phone(data.phone)
     email_normalized = data.email.lower().strip()
@@ -67,9 +70,11 @@ def login_telegram_secure(
 
     print(f"🔐 Login Seguro Intentando: Phone: {phone_normalized} | Email: {email_normalized}")
 
-    user = db.scalar(select(User).where(
-        (User.phone == phone_normalized) & (User.email == email_normalized)
-    ))
+    stmt = select(User).where(
+        and_(User.phone == phone_normalized, User.email == email_normalized)
+    )
+    result = await db.execute(stmt)
+    user = result.scalars().first()
 
     if not user:
         print("❌ Fallo de autenticación")
@@ -82,8 +87,8 @@ def login_telegram_secure(
         print(f"🔗 Vinculando nuevo Chat ID: {data.telegram_chat_id}")
         user.telegram_chat_id = data.telegram_chat_id
         db.add(user)
-        db.commit()
-        db.refresh(user)
+        await db.commit()
+        await db.refresh(user)
 
     access_token = security.create_access_token(
         subject=str(user.id),
@@ -92,7 +97,7 @@ def login_telegram_secure(
 
     print(f"✅ Login Exitoso: {user.first_name}")
 
-    log_activity(
+    await log_activity(
         db=db,
         user_id=user.id,
         action="LOGIN",
@@ -107,14 +112,17 @@ def login_telegram_secure(
         user_name=user.first_name or "Usuario"
     )
 
+
 @router.post("/login-silent", response_model=TelegramAuthResponse)
-def login_by_telegram_id(
+async def login_by_telegram_id(
     data: TelegramLoginRequest,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ) -> TelegramAuthResponse:
     print(f"🤫 Login Silencioso ID: {data.telegram_chat_id}")
     
-    user = db.scalar(select(User).where(User.telegram_chat_id == data.telegram_chat_id))
+    stmt = select(User).where(User.telegram_chat_id == data.telegram_chat_id)
+    result = await db.execute(stmt)
+    user = result.scalars().first()
 
     if not user:
         print("❌ ID de Telegram no reconocido")
@@ -128,7 +136,7 @@ def login_by_telegram_id(
         expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
 
-    log_activity(
+    await log_activity(
         db=db,
         user_id=user.id,
         action="LOGIN_SILENT",
@@ -144,18 +152,21 @@ def login_by_telegram_id(
         user_name=user.first_name or "Usuario"
     )
 
+
 # ✅ --- NUEVO: DESVINCULAR DESDE EL BOT ---
 @router.post("/unlink", status_code=200)
-def unlink_telegram_bot(
+async def unlink_telegram_bot(
     data: TelegramLoginRequest, # Reutilizamos este schema porque trae 'telegram_chat_id'
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ) -> dict:
     """
     Permite al usuario desvincularse usando un comando en el bot (ej: /logout).
     """
     print(f"✂️ Intentando desvincular Chat ID: {data.telegram_chat_id}")
     
-    user = db.scalar(select(User).where(User.telegram_chat_id == data.telegram_chat_id))
+    stmt = select(User).where(User.telegram_chat_id == data.telegram_chat_id)
+    result = await db.execute(stmt)
+    user = result.scalars().first()
     
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado o ya desvinculado")
@@ -165,9 +176,9 @@ def unlink_telegram_bot(
     user.phone = None
     
     db.add(user)
-    db.commit()
+    await db.commit()
     
-    log_activity(
+    await log_activity(
         db=db,
         user_id=user.id,
         action="UNLINK_TELEGRAM",

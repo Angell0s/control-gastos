@@ -1,11 +1,12 @@
 #backend\app\services\audit.py
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession  # <-- Cambio: AsyncSession
+from sqlalchemy import select
 from datetime import datetime
 from app.models.user import User, AuditLog
 import uuid
 
-def log_activity(
-    db: Session,
+async def log_activity(  # <-- Cambio: async def
+    db: AsyncSession,    # <-- Cambio: AsyncSession
     user_id: uuid.UUID,
     action: str,
     source: str,
@@ -13,14 +14,7 @@ def log_activity(
     update_last_login: bool = False
 ):
     """
-    Registra una actividad en la bitácora y opcionalmente actualiza el last_login del usuario.
-    
-    :param db: Sesión de base de datos
-    :param user_id: ID del usuario
-    :param action: Acción realizada (LOGIN, LOGOUT, CREATE, etc.)
-    :param source: Fuente (WEB, TELEGRAM)
-    :param details: Detalles adicionales opcionales
-    :param update_last_login: Si es True, actualiza el campo last_login del usuario
+    Registra una actividad en la bitácora (Versión Async).
     """
     # 1. Crear registro de log
     new_log = AuditLog(
@@ -32,17 +26,19 @@ def log_activity(
     )
     db.add(new_log)
 
-    # 2. Actualizar last_login si se requiere (Solo en logins)
+    # 2. Actualizar last_login si se requiere
     if update_last_login:
-        user = db.query(User).filter(User.id == user_id).first()
+        # Consulta async para obtener el usuario
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalars().first()
+        
         if user:
             user.last_login = datetime.utcnow()
             db.add(user)
 
     # 3. Guardar cambios
     try:
-        db.commit()
-        # No hacemos refresh del log porque raramente necesitamos devolverlo inmediato
+        await db.commit()  # <-- Cambio: await
     except Exception as e:
         print(f"❌ Error escribiendo bitácora: {e}")
-        db.rollback()
+        await db.rollback() # <-- Cambio: await

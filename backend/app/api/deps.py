@@ -1,34 +1,36 @@
 #backend\app\api\deps.py
-from typing import Generator
+from typing import AsyncGenerator
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from pydantic import ValidationError
-from sqlalchemy.orm import Session
+from sqlalchemy import select  # <--- NECESARIO PARA CONSULTAS ASYNC
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import SessionLocal
+from app.db.session import AsyncSessionLocal
 from app.models.user import User
 from app.core.config import settings
 
-# 1. Configuración de la ruta de Login para Swagger
-# Esto le dice al botón "Authorize": "Manda el usuario y pass a esta URL"
+# 1. Configuración de OAuth2
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/login/access-token")
 
-# 2. Dependencia de Base de Datos
-def get_db() -> Generator:
-    try:
-        db = SessionLocal()
-        yield db
-    finally:
-        db.close()
+# 2. Dependencia de Base de Datos (ASÍNCRONA)
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+            # En async, el commit se suele hacer explícito en los endpoints si modificas datos
+        finally:
+            # session.close() es automático al salir del contexto 'async with'
+            pass
 
-# 3. Obtener el usuario actual (Protección de Rutas)
-def get_current_user(
-    db: Session = Depends(get_db), 
+# 3. Obtener usuario actual (ASÍNCRONO)
+async def get_current_user(
+    db: AsyncSession = Depends(get_db), 
     token: str = Depends(oauth2_scheme)
 ) -> User:
     """
-    Decodifica el token JWT, extrae el ID del usuario y lo busca en la BD.
+    Decodifica el token JWT y busca al usuario de forma asíncrona.
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -37,14 +39,11 @@ def get_current_user(
     )
     
     try:
-        # Decodificamos el token usando la CLAVE SECRETA del .env
         payload = jwt.decode(
             token, 
             settings.SECRET_KEY, 
             algorithms=[settings.ALGORITHM]
         )
-        
-        # Extraemos el ID del usuario (guardado en el campo 'sub')
         user_id: str = payload.get("sub")
         
         if user_id is None:
@@ -53,28 +52,29 @@ def get_current_user(
     except (JWTError, ValidationError):
         raise credentials_exception
         
-    # Buscamos al usuario en la base de datos
-    user = db.query(User).filter(User.id == user_id).first()
+    # --- CAMBIO CLAVE: CONSULTA ASÍNCRONA ---
+    # En async no existe db.query(User).filter(...)
+    # Se usa la sintaxis moderna de SQLAlchemy 2.0:
+    
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalars().first() # scalars() obtiene los objetos puros
     
     if user is None:
         raise credentials_exception
         
-    # Si todo está bien, devolvemos el objeto usuario completo
     return user
 
-def get_current_active_superuser(
+# 4. Superusuario (ASÍNCRONO)
+async def get_current_active_superuser(
     current_user: User = Depends(get_current_user),
 ) -> User:
-    """
-    Valida que el usuario esté logueado, sea activo y sea Superusuario.
-    """
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="El usuario está inactivo")
     
     if not current_user.is_superuser:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, 
-            detail="No tienes privilegios suficientes (Requiere Superusuario)"
+            detail="No tienes privilegios suficientes"
         )
     
     return current_user

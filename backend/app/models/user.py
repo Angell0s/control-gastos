@@ -36,6 +36,9 @@ class User(Base):
     # ✅ Relación con la Bitácora (Opcional, útil para ORM)
     logs: Mapped[List["AuditLog"]] = relationship("AuditLog", back_populates="user")
 
+    #Relación con "Ingreso"
+    ingresos = relationship("Ingreso", back_populates="user")
+
 # --- NUEVA TABLA DE BITÁCORA ---
 class AuditLog(Base):
     __tablename__ = "audit_logs"

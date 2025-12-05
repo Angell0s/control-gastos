@@ -1,9 +1,11 @@
 #backend\app\api\routers\users.py
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from typing import List, Annotated, Optional
-from app.db.session import get_db
-from app.api.deps import get_current_user, get_current_active_superuser 
+
+from app.api.deps import get_db, get_current_user, get_current_active_superuser 
 from app.models.user import User, AuditLog
 from app.schemas.user import (
     UserResponse, 
@@ -22,13 +24,16 @@ router = APIRouter()
 
 # 1. Crear usuario (Admin)
 @router.post("/", response_model=UserResponseAdmin, status_code=status.HTTP_201_CREATED)
-def create_user(
+async def create_user(
     *,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user_in: UserCreate,
     current_user: User = Depends(get_current_active_superuser) 
 ):
-    user = db.query(User).filter(User.email == user_in.email).first()
+    stmt = select(User).where(User.email == user_in.email)
+    result = await db.execute(stmt)
+    user = result.scalars().first()
+    
     if user:
         raise HTTPException(status_code=400, detail="El usuario con este email ya existe.")
     
@@ -45,11 +50,10 @@ def create_user(
     db.add(db_user)
 
     try:
-        db.commit()
-        db.refresh(db_user)
+        await db.commit()
+        await db.refresh(db_user)
 
-        # ✅ LOG ÉXITO
-        log_activity(
+        await log_activity(
             db=db,
             user_id=current_user.id,
             action="CREATE_USER",
@@ -57,15 +61,13 @@ def create_user(
             details=f"Creó usuario {db_user.email}"
         )
     except Exception as e:
-        db.rollback()
-        # ❌ LOG FALLO
+        await db.rollback()
         try:
-            log_activity(
+            await log_activity(
                 db=db, user_id=current_user.id, 
                 action="CREATE_USER_FAILED", source="WEB_APP", 
                 details=f"Falló creando {user_in.email}: {str(e)}"
             )
-            db.commit()
         except: pass
         raise HTTPException(status_code=400, detail=f"Error creando usuario: {str(e)}")
 
@@ -74,12 +76,15 @@ def create_user(
 
 # 2. Registro público
 @router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-def register_user(
+async def register_user(
     *,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user_in: UserSignup,
 ):
-    user = db.query(User).filter(User.email == user_in.email).first()
+    stmt = select(User).where(User.email == user_in.email)
+    result = await db.execute(stmt)
+    user = result.scalars().first()
+    
     if user:
         raise HTTPException(status_code=400, detail="El email ya está registrado.")
 
@@ -96,12 +101,10 @@ def register_user(
     db.add(db_user)
 
     try:
-        db.commit()
-        db.refresh(db_user)
+        await db.commit()
+        await db.refresh(db_user)
 
-        # ✅ LOG ÉXITO
-        # Nota: Aquí usamos el ID del usuario recién creado porque ya existe tras el commit
-        log_activity(
+        await log_activity(
             db=db,
             user_id=db_user.id,
             action="SIGNUP",
@@ -109,9 +112,7 @@ def register_user(
             details="Registro público exitoso"
         )
     except Exception as e:
-        db.rollback()
-        # Nota: En signup no logueamos el fallo en BD porque el usuario no existe 
-        # y no tenemos un user_id válido para la Foreign Key de AuditLog.
+        await db.rollback()
         raise HTTPException(status_code=400, detail=f"Error en el registro: {str(e)}")
 
     return db_user
@@ -121,19 +122,20 @@ def register_user(
 
 # 3. Lista de usuarios (Admin)
 @router.get("/", response_model=List[UserResponseAdmin])
-def read_users(
+async def read_users(
     skip: int = 0, 
     limit: int = 100, 
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_superuser) 
 ):
-    users = db.query(User).offset(skip).limit(limit).all()
-    return users
+    stmt = select(User).offset(skip).limit(limit)
+    result = await db.execute(stmt)
+    return result.scalars().all()
 
 
 # 4. Perfil propio
 @router.get("/me", response_model=UserResponse)
-def read_users_me(
+async def read_users_me(
     current_user: Annotated[User, Depends(get_current_user)]
 ):
     return current_user
@@ -141,12 +143,15 @@ def read_users_me(
 
 # 5. Obtener usuario por ID (Admin)
 @router.get("/{user_id}", response_model=UserResponseAdmin)
-def read_user_by_id(
+async def read_user_by_id(
     user_id: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_superuser)
 ):
-    user = db.query(User).filter(User.id == user_id).first()
+    stmt = select(User).where(User.id == user_id)
+    result = await db.execute(stmt)
+    user = result.scalars().first()
+    
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     return user
@@ -156,18 +161,14 @@ def read_user_by_id(
 
 # 6. Actualizar perfil propio
 @router.put("/me", response_model=UserResponse)
-def update_user_me(
+async def update_user_me(
     *,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user_in: UserUpdate,
     current_user: User = Depends(get_current_user)
 ):
-    """
-    Permite al usuario actualizar su propio perfil.
-    """
     update_data = user_in.model_dump(exclude_unset=True)
     
-    # Si cambia la contraseña, hashearla
     if "password" in update_data and update_data["password"]:
         update_data["hashed_password"] = get_password_hash(update_data.pop("password"))
     
@@ -177,11 +178,10 @@ def update_user_me(
     db.add(current_user)
     
     try:
-        db.commit()
-        db.refresh(current_user)
+        await db.commit()
+        await db.refresh(current_user)
 
-        # ✅ LOG ÉXITO
-        log_activity(
+        await log_activity(
             db=db,
             user_id=current_user.id,
             action="UPDATE_PROFILE",
@@ -189,15 +189,13 @@ def update_user_me(
             details="Actualizó su perfil"
         )
     except Exception as e:
-        db.rollback()
-        # ❌ LOG FALLO
+        await db.rollback()
         try:
-            log_activity(
+            await log_activity(
                 db=db, user_id=current_user.id, 
                 action="UPDATE_PROFILE_FAILED", source="WEB_APP", 
                 details=f"Error actualizando perfil: {str(e)}"
             )
-            db.commit()
         except: pass
         raise HTTPException(status_code=400, detail=f"Error actualizando perfil: {str(e)}")
 
@@ -206,17 +204,17 @@ def update_user_me(
 
 # 7. Actualizar usuario (Admin)
 @router.put("/{user_id}", response_model=UserResponseAdmin)
-def update_user(
+async def update_user(
     *,
     user_id: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user_in: UserUpdate,
     current_user: User = Depends(get_current_active_superuser)
 ):
-    """
-    Permite a un admin actualizar cualquier usuario (incluyendo roles y estado).
-    """
-    user = db.query(User).filter(User.id == user_id).first()
+    stmt = select(User).where(User.id == user_id)
+    result = await db.execute(stmt)
+    user = result.scalars().first()
+    
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
@@ -231,11 +229,10 @@ def update_user(
     db.add(user)
 
     try:
-        db.commit()
-        db.refresh(user)
+        await db.commit()
+        await db.refresh(user)
 
-        # ✅ LOG ÉXITO
-        log_activity(
+        await log_activity(
             db=db,
             user_id=current_user.id,
             action="UPDATE_USER",
@@ -243,15 +240,13 @@ def update_user(
             details=f"Actualizó usuario {user.email}"
         )
     except Exception as e:
-        db.rollback()
-        # ❌ LOG FALLO
+        await db.rollback()
         try:
-            log_activity(
+            await log_activity(
                 db=db, user_id=current_user.id, 
                 action="UPDATE_USER_FAILED", source="WEB_APP", 
                 details=f"Error actualizando usuario {user.email}: {str(e)}"
             )
-            db.commit()
         except: pass
         raise HTTPException(status_code=400, detail=f"Error actualizando usuario: {str(e)}")
 
@@ -262,43 +257,39 @@ def update_user(
 
 # 8. Eliminar usuario (Admin)
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_user(
+async def delete_user(
     *,
     user_id: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_superuser)
 ):
-    """
-    Desactiva un usuario (soft delete).
-    """
-    user = db.query(User).filter(User.id == user_id).first()
+    stmt = select(User).where(User.id == user_id)
+    result = await db.execute(stmt)
+    user = result.scalars().first()
+    
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     
-    # Evitar que el admin se elimine a sí mismo
     if user.id == current_user.id:
-        # ❌ LOG INTENTO FALLIDO
         try:
-            log_activity(
+            await log_activity(
                 db=db, user_id=current_user.id, 
                 action="DELETE_USER_DENIED", source="WEB_APP", 
                 details="Intento de auto-eliminación"
             )
-            db.commit()
         except: pass
         raise HTTPException(status_code=400, detail="No puedes eliminarte a ti mismo")
     
-    user_email = user.email # Guardar para el log
+    user_email = user.email 
 
     # Soft Delete
     user.is_active = False
     db.add(user)
     
     try:
-        db.commit()
+        await db.commit()
 
-        # ✅ LOG ÉXITO
-        log_activity(
+        await log_activity(
             db=db,
             user_id=current_user.id,
             action="DELETE_USER",
@@ -306,15 +297,13 @@ def delete_user(
             details=f"Eliminó/desactivó usuario {user_email}"
         )
     except Exception as e:
-        db.rollback()
-        # ❌ LOG FALLO
+        await db.rollback()
         try:
-            log_activity(
+            await log_activity(
                 db=db, user_id=current_user.id, 
                 action="DELETE_USER_FAILED", source="WEB_APP", 
                 details=f"Error eliminando {user_email}: {str(e)}"
             )
-            db.commit()
         except: pass
         raise HTTPException(status_code=400, detail=f"Error eliminando usuario: {str(e)}")
 
@@ -325,46 +314,46 @@ def delete_user(
 
 # 9. Bitácora del usuario actual
 @router.get("/me/logs", response_model=List[AuditLogResponse])
-def read_user_logs(
+async def read_user_logs(
     skip: int = 0,
     limit: int = 50,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    logs = (
-        db.query(AuditLog)
-        .filter(AuditLog.user_id == current_user.id)
+    stmt = (
+        select(AuditLog)
+        .where(AuditLog.user_id == current_user.id)
         .order_by(AuditLog.timestamp.desc())
         .offset(skip)
         .limit(limit)
-        .all()
     )
-    return logs
+    result = await db.execute(stmt)
+    return result.scalars().all()
 
 
 # 10. Bitácora completa (Admin)
 @router.get("/logs/all", response_model=List[AuditLogResponse])
-def read_all_logs(
+async def read_all_logs(
     skip: int = 0,
     limit: int = 100,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_superuser)
 ):
-    logs = (
-        db.query(AuditLog)
-        .options(joinedload(AuditLog.user))
+    stmt = (
+        select(AuditLog)
+        .options(selectinload(AuditLog.user)) # Cargar relación usuario
         .order_by(AuditLog.timestamp.desc())
         .offset(skip)
         .limit(limit)
-        .all()
     )
-    return logs
+    result = await db.execute(stmt)
+    return result.scalars().all()
 
 
 # 11. Desvincular Telegram
 @router.post("/me/unlink-telegram", response_model=UserResponse)
-def unlink_telegram_web(
-    db: Session = Depends(get_db),
+async def unlink_telegram_web(
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     if not current_user.telegram_chat_id:
@@ -377,11 +366,10 @@ def unlink_telegram_web(
     db.add(current_user)
     
     try:
-        db.commit()
-        db.refresh(current_user)
+        await db.commit()
+        await db.refresh(current_user)
         
-        # ✅ LOG ÉXITO
-        log_activity(
+        await log_activity(
             db=db,
             user_id=current_user.id,
             action="UNLINK_TELEGRAM",
@@ -389,15 +377,13 @@ def unlink_telegram_web(
             details=f"Desvinculación (Chat ID: {old_chat_id})"
         )
     except Exception as e:
-        db.rollback()
-        # ❌ LOG FALLO
+        await db.rollback()
         try:
-            log_activity(
+            await log_activity(
                 db=db, user_id=current_user.id, 
                 action="UNLINK_TELEGRAM_FAILED", source="WEB_APP", 
                 details=f"Error desvinculando: {str(e)}"
             )
-            db.commit()
         except: pass
         raise HTTPException(status_code=400, detail=f"Error desvinculando: {str(e)}")
     

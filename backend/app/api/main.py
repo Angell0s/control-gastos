@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.routers import users, expenses, auth, categories, telegram
+from app.api.routers import users, expenses, auth, categories, telegram, incomes
 
 api_router = APIRouter()
 
@@ -10,3 +10,4 @@ api_router.include_router(users.router, prefix="/users", tags=["users"])
 api_router.include_router(expenses.router, prefix="/expenses", tags=["expenses"])
 api_router.include_router(categories.router, prefix="/categories", tags=["categories"])  # ✅ CORREGIDO
 api_router.include_router(telegram.router, prefix="/telegram", tags=["telegram"])      # ✅ OK
+api_router.include_router(incomes.router, prefix="/incomes", tags=["incomes"])

@@ -1,30 +1,37 @@
+#backend\app\api\routers\auth.py
 from datetime import timedelta
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession  # <-- CAMBIO: Usar AsyncSession
+from sqlalchemy import select                  # <-- CAMBIO: Importar select para consultas
 
 # Imports de tus archivos
-from app.db.session import get_db
+from app.api.deps import get_db                # <-- CAMBIO: Importar desde deps, no session
 from app.core import security
 from app.core.config import settings
-from app.models.user import User  # Asumiendo que tu modelo User está aquí
+from app.models.user import User
 from app.schemas.token import Token
 
 router = APIRouter()
 
 @router.post("/login/access-token", response_model=Token)
-def login_access_token(
-    db: Session = Depends(get_db), 
+async def login_access_token(                  # <-- CAMBIO: async def
+    db: AsyncSession = Depends(get_db),        # <-- CAMBIO: Tipo AsyncSession
     form_data: OAuth2PasswordRequestForm = Depends()
 ) -> Any:
     """
-    Valida credenciales y devuelve un JWT.
+    Valida credenciales y devuelve un JWT (Versión Async).
     """
-    # 1. Buscamos al usuario por EMAIL (mapeado desde form_data.username)
-    user = db.query(User).filter(User.email == form_data.username).first()
+    # 1. Buscamos al usuario por EMAIL de forma asíncrona
+    # db.query() NO EXISTE en modo async. Usamos: await db.execute(select(...))
+    
+    query = select(User).where(User.email == form_data.username)
+    result = await db.execute(query)
+    user = result.scalars().first()
     
     # 2. Validaciones: ¿Existe el usuario? ¿Coincide la contraseña?
+    # (security.verify_password no necesita await porque es CPU-bound, no I/O bound)
     if not user or not security.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -38,9 +45,9 @@ def login_access_token(
     # 4. Definir expiración del token
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     
-    # 5. Crear el token
+    # 5. Crear el token (Esto es pura lógica de Python, no requiere await)
     access_token = security.create_access_token(
-        subject=user.id,  # Guardamos el ID del usuario dentro del token
+        subject=str(user.id),  # Aseguramos que sea string por si es UUID
         expires_delta=access_token_expires
     )
     
