@@ -2,7 +2,7 @@
 from typing import List, Optional
 from uuid import UUID
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 # --- Schemas para Category ---
 class CategoryBase(BaseModel):
@@ -16,10 +16,15 @@ class CategoryUpdate(BaseModel):
 
 class CategoryResponse(CategoryBase):
     id: UUID
-    items_count: int = 0 
+    
+    # Desglose explícito
+    expenses_count: int = 0
+    incomes_count: int = 0
+    
+    # Propiedad calculada (opcional, útil para UI rápida)
+    total_items_count: int = 0 
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # --- Schemas para ExpenseItem ---
 class ExpenseItemBase(BaseModel):

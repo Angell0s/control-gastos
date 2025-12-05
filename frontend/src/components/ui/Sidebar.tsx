@@ -26,7 +26,8 @@ import {
   ClipboardDocumentListIcon,
   ChevronDownIcon,
   PlusIcon,
-  ListBulletIcon
+  ListBulletIcon,
+  ArrowTrendingUpIcon
 } from "@heroicons/react/24/outline";
 import { useAuthStore } from "@/store/authStore";
 import { useUIStore } from "@/store/uiStore";
@@ -49,11 +50,11 @@ type NavItem = {
 
 const navigation: NavItem[] = [
   { name: "Dashboard", href: "/dashboard", icon: HomeIcon },
+  { name: "Ingresos", href: "/ingresos", icon: ArrowTrendingUpIcon },
   { 
     name: "Mis Gastos", 
     href: "/gastos", 
     icon: BanknotesIcon,
-    // ✅ AÑADIMOS HIJOS A GASTOS
     children: [
       { name: "Ver Listado", href: "/gastos", icon: ListBulletIcon },
       { name: "Registrar Nuevo", href: "/gastos?action=new", icon: PlusIcon, action: "new-expense" }

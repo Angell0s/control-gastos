@@ -1,14 +1,16 @@
-# backend\app\api\routers\categories.py
+# backend/app/api/routers/categories.py
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import func, case, select, desc
+from sqlalchemy import func, select, desc
 from typing import List, Optional
-import uuid
+from uuid import UUID
 
 from app.api import deps
 from app.models import Category, User, ExpenseItem, Expense
+from app.models.incomes import IngresoItem, Ingreso # Importamos modelos de ingreso
 from app.schemas import CategoryCreate, CategoryResponse, CategoryUpdate, ExpenseItemResponse
 from app.services.audit import log_activity
+from app.schemas.income import IngresoItemResponse 
 
 router = APIRouter()
 
@@ -20,22 +22,41 @@ async def read_all_categories_admin(
     skip: int = 0,
     limit: int = 100,
 ):
-    # Construcción de la consulta con estilo select()
+    # Subquery para Gastos (Globales)
+    sq_expenses = (
+        select(ExpenseItem.category_id, func.count(ExpenseItem.id).label("count"))
+        .group_by(ExpenseItem.category_id)
+        .subquery()
+    )
+
+    # Subquery para Ingresos (Globales)
+    sq_incomes = (
+        select(IngresoItem.category_id, func.count(IngresoItem.id).label("count"))
+        .group_by(IngresoItem.category_id)
+        .subquery()
+    )
+
     stmt = (
-        select(Category, func.count(ExpenseItem.id).label("count"))
-        .outerjoin(ExpenseItem, Category.id == ExpenseItem.category_id)
-        .group_by(Category.id)
+        select(
+            Category,
+            func.coalesce(sq_expenses.c.count, 0).label("exp_count"),
+            func.coalesce(sq_incomes.c.count, 0).label("inc_count")
+        )
+        .outerjoin(sq_expenses, Category.id == sq_expenses.c.category_id)
+        .outerjoin(sq_incomes, Category.id == sq_incomes.c.category_id)
         .order_by(Category.name)
         .offset(skip)
         .limit(limit)
     )
     
     result = await db.execute(stmt)
-    rows = result.all()  # Esto devuelve una lista de tuplas (Category, count)
+    rows = result.all()
 
     mapped_results = []
-    for cat, count in rows:
-        cat.items_count = count
+    for cat, exp_c, inc_c in rows:
+        cat.expenses_count = exp_c
+        cat.incomes_count = inc_c
+        cat.total_items_count = exp_c + inc_c
         mapped_results.append(cat)
         
     return mapped_results
@@ -49,8 +70,8 @@ async def read_categories(
     skip: int = 0,
     limit: int = 100,
 ):
-    # Subquery para contar items del usuario
-    user_items_subquery = (
+    # 1. Subquery Gastos del Usuario
+    sq_expenses = (
         select(
             ExpenseItem.category_id,
             func.count(ExpenseItem.id).label('count')
@@ -61,13 +82,27 @@ async def read_categories(
         .subquery()
     )
 
-    # Consulta principal
+    # 2. Subquery Ingresos del Usuario
+    sq_incomes = (
+        select(
+            IngresoItem.category_id,
+            func.count(IngresoItem.id).label('count')
+        )
+        .join(Ingreso, IngresoItem.ingreso_id == Ingreso.id)
+        .where(Ingreso.user_id == current_user.id)
+        .group_by(IngresoItem.category_id)
+        .subquery()
+    )
+
+    # 3. Consulta Principal con Doble Join
     stmt = (
         select(
             Category, 
-            func.coalesce(user_items_subquery.c.count, 0).label("user_count")
+            func.coalesce(sq_expenses.c.count, 0).label("exp_count"),
+            func.coalesce(sq_incomes.c.count, 0).label("inc_count")
         )
-        .outerjoin(user_items_subquery, Category.id == user_items_subquery.c.category_id)
+        .outerjoin(sq_expenses, Category.id == sq_expenses.c.category_id)
+        .outerjoin(sq_incomes, Category.id == sq_incomes.c.category_id)
         .order_by(Category.name)
         .offset(skip)
         .limit(limit)
@@ -77,30 +112,98 @@ async def read_categories(
     rows = result.all()
     
     mapped_results = []
-    for cat, count in rows:
-        cat.items_count = count
+    for cat, exp_c, inc_c in rows:
+        cat.expenses_count = exp_c
+        cat.incomes_count = inc_c
+        cat.total_items_count = exp_c + inc_c
         mapped_results.append(cat)
         
     return mapped_results
 
+# --- 2.1. ENDPOINT: LISTAR SOLO CATEGORÍAS ACTIVAS (CON MOVIMIENTOS) ---
+@router.get("/active", response_model=List[CategoryResponse])
+async def read_active_categories(
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+    skip: int = 0,
+    limit: int = 100,
+):
+    """
+    Retorna solo las categorías donde el usuario tiene al menos un gasto o un ingreso.
+    Útil para filtros de reportes y selectores limpios.
+    """
+    
+    # 1. Subquery Gastos del Usuario (Igual que arriba)
+    sq_expenses = (
+        select(
+            ExpenseItem.category_id,
+            func.count(ExpenseItem.id).label('count')
+        )
+        .join(Expense, ExpenseItem.expense_id == Expense.id)
+        .where(Expense.user_id == current_user.id)
+        .group_by(ExpenseItem.category_id)
+        .subquery()
+    )
 
-# --- 3. ENDPOINT: VER ITEMS DE UNA CATEGORÍA (SOLO DEL USUARIO) ---
-@router.get("/{category_id}/items", response_model=List[ExpenseItemResponse])
-async def read_category_items(
-    category_id: str,
+    # 2. Subquery Ingresos del Usuario (Igual que arriba)
+    sq_incomes = (
+        select(
+            IngresoItem.category_id,
+            func.count(IngresoItem.id).label('count')
+        )
+        .join(Ingreso, IngresoItem.ingreso_id == Ingreso.id)
+        .where(Ingreso.user_id == current_user.id)
+        .group_by(IngresoItem.category_id)
+        .subquery()
+    )
+
+    # 3. Consulta Principal con FILTRO (WHERE)
+    # Aquí está la magia: Usamos INNER JOIN implícito o WHERE para filtrar
+    stmt = (
+        select(
+            Category, 
+            func.coalesce(sq_expenses.c.count, 0).label("exp_count"),
+            func.coalesce(sq_incomes.c.count, 0).label("inc_count")
+        )
+        # Usamos outerjoin para calcular los números...
+        .outerjoin(sq_expenses, Category.id == sq_expenses.c.category_id)
+        .outerjoin(sq_incomes, Category.id == sq_incomes.c.category_id)
+        # ...PERO filtramos para que al menos uno de los dos contadores sea mayor a 0
+        .where(
+            (func.coalesce(sq_expenses.c.count, 0) > 0) | 
+            (func.coalesce(sq_incomes.c.count, 0) > 0)
+        )
+        .order_by(Category.name)
+        .offset(skip)
+        .limit(limit)
+    )
+    
+    result = await db.execute(stmt)
+    rows = result.all()
+    
+    mapped_results = []
+    for cat, exp_c, inc_c in rows:
+        cat.expenses_count = exp_c
+        cat.incomes_count = inc_c
+        cat.total_items_count = exp_c + inc_c
+        mapped_results.append(cat)
+        
+    return mapped_results
+
+# --- 3. NUEVOS ENDPOINTS SEPARADOS PARA LISTAR ITEMS ---
+
+@router.get("/{category_id}/expenses", response_model=List[ExpenseItemResponse])
+async def read_category_expenses(
+    category_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
     skip: int = 0,
     limit: int = 100
 ):
-    # Validar categoría
-    result_cat = await db.execute(select(Category).where(Category.id == category_id))
-    category = result_cat.scalars().first()
-    
-    if not category:
-        raise HTTPException(status_code=404, detail="Categoría no encontrada")
+    """Devuelve solo los gastos de una categoría para este usuario."""
+    # Validar existencia categoría (opcional, si quieres 404 estricto)
+    # ...
 
-    # Consulta de items
     stmt = (
         select(ExpenseItem)
         .join(Expense, ExpenseItem.expense_id == Expense.id)
@@ -109,51 +212,75 @@ async def read_category_items(
         .offset(skip)
         .limit(limit)
     )
-    
     result = await db.execute(stmt)
-    items = result.scalars().all()
-    
-    return items
+    return result.scalars().all()
+
+@router.get("/{category_id}/incomes", response_model=List[IngresoItemResponse])
+async def read_category_incomes(
+    category_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+    skip: int = 0,
+    limit: int = 100
+):
+    """Devuelve solo los ingresos de una categoría para este usuario."""
+    stmt = (
+        select(IngresoItem)
+        .join(Ingreso, IngresoItem.ingreso_id == Ingreso.id)
+        .where(IngresoItem.category_id == category_id)
+        .where(Ingreso.user_id == current_user.id)
+        .offset(skip)
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    return result.scalars().all()
 
 
-# --- 4. OBTENER UNA CATEGORÍA POR ID ---
+# --- 4. OBTENER UNA CATEGORÍA POR ID (CON CONTEO) ---
 @router.get("/{category_id}", response_model=CategoryResponse)
 async def read_category(
-    category_id: str,
+    category_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
-    user_items_subquery = (
-        select(
-            ExpenseItem.category_id,
-            func.count(ExpenseItem.id).label('count')
-        )
+    # Reutilizamos la lógica de subqueries pero filtrada por ID
+    
+    sq_expenses = (
+        select(func.count(ExpenseItem.id))
         .join(Expense, ExpenseItem.expense_id == Expense.id)
         .where(Expense.user_id == current_user.id)
         .where(ExpenseItem.category_id == category_id)
-        .group_by(ExpenseItem.category_id)
-        .subquery()
+        .scalar_subquery()
+    )
+
+    sq_incomes = (
+        select(func.count(IngresoItem.id))
+        .join(Ingreso, IngresoItem.ingreso_id == Ingreso.id)
+        .where(Ingreso.user_id == current_user.id)
+        .where(IngresoItem.category_id == category_id)
+        .scalar_subquery()
     )
 
     stmt = (
         select(
             Category, 
-            func.coalesce(user_items_subquery.c.count, 0)
+            func.coalesce(sq_expenses, 0),
+            func.coalesce(sq_incomes, 0)
         )
-        .outerjoin(user_items_subquery, Category.id == user_items_subquery.c.category_id)
         .where(Category.id == category_id)
     )
 
     result = await db.execute(stmt)
-    row = result.first() # En async esto devuelve una Row o None
+    row = result.first()
 
     if not row:
         raise HTTPException(status_code=404, detail="Categoría no encontrada")
     
-    category, count = row
-    category.items_count = count
+    category, exp_c, inc_c = row
+    category.expenses_count = exp_c
+    category.incomes_count = inc_c
+    category.total_items_count = exp_c + inc_c
     return category
-
 
 # --- 5. CREAR ---
 @router.post("/", response_model=CategoryResponse, status_code=status.HTTP_201_CREATED)

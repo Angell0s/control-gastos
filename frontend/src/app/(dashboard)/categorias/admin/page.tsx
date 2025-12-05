@@ -9,7 +9,6 @@ import { DataTable, ColumnDef } from "@/components/DataTable";
 import { Modal } from "@/components/Modal";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
-import { Switch } from "@headlessui/react"; // Si no tienes HeadlessUI, puedes usar un checkbox estilizado simple. Aquí uso una implementación manual con div.
 import { 
   TagIcon, 
   PencilSquareIcon, 
@@ -20,16 +19,22 @@ import {
   ArrowPathIcon,
   LockClosedIcon,
   BanknotesIcon,
+  ShoppingCartIcon,
   EyeIcon,
-  EyeSlashIcon
+  EyeSlashIcon,
+  ArrowTrendingDownIcon,
+  ArrowTrendingUpIcon
 } from "@heroicons/react/24/outline";
 import { toast } from "sonner";
+import clsx from "clsx";
 
 // --- TIPOS ---
 interface Category {
   id: string;
   name: string;
-  items_count: number; // ✅ Nuevo campo para el badge
+  expenses_count: number;
+  incomes_count: number;
+  total_items_count: number;
 }
 
 interface CategoryFormData {
@@ -60,9 +65,6 @@ export default function AdminCategoriasPage() {
   const fetchCategories = async () => {
     try {
       setLoading(true);
-      // ✅ LÓGICA DE SWITCH DE ENDPOINT
-      // Si isAdminView es true y es superuser, usamos el endpoint de admin.
-      // Si no, usamos el normal.
       const endpoint = (isAdminView && user?.is_superuser) 
         ? "/categories/admin/all" 
         : "/categories/";
@@ -81,7 +83,7 @@ export default function AdminCategoriasPage() {
   useEffect(() => {
     if (token) fetchCategories();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, isAdminView]); // Recargar si cambia el token o el modo de vista
+  }, [token, isAdminView]); 
 
   // --- HANDLERS ---
   const handleOpenCreate = () => {
@@ -163,25 +165,32 @@ export default function AdminCategoriasPage() {
       header: "Categoría",
       accessorKey: "name",
       cell: (cat) => (
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
-          <div className="flex items-center gap-3 font-medium text-foreground">
+        <div className="flex flex-col gap-1 py-1">
+          <div className="flex items-center gap-2 font-medium text-foreground">
             <div className="p-1.5 bg-primary/10 rounded text-primary">
               <TagIcon className="h-4 w-4" />
             </div>
             {cat.name}
           </div>
-
-          {/* ✅ BADGE DE ITEMS (Dinámico según la vista) */}
-          <span className={`
-            text-[10px] px-2 py-0.5 rounded-full font-medium border flex items-center gap-1 w-fit
-            ${cat.items_count > 0 
-              ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800" 
-              : "bg-gray-50 text-gray-400 border-gray-200 dark:bg-gray-800 dark:text-gray-500 dark:border-gray-700"
-            }
-          `}>
-            <BanknotesIcon className="h-3 w-3" />
-            {cat.items_count}
-          </span>
+          
+          {/* DESGLOSE DE USO */}
+          <div className="flex gap-2 mt-1 ml-8">
+            {cat.expenses_count > 0 && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-50 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 border border-orange-100 dark:border-orange-800 flex items-center gap-1">
+                    <ArrowTrendingDownIcon className="h-3 w-3" />
+                    {cat.expenses_count}
+                </span>
+            )}
+            {cat.incomes_count > 0 && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400 border border-green-100 dark:border-green-800 flex items-center gap-1">
+                    <ArrowTrendingUpIcon className="h-3 w-3" />
+                    {cat.incomes_count}
+                </span>
+            )}
+            {cat.total_items_count === 0 && (
+                <span className="text-[10px] text-muted-foreground italic">Sin uso</span>
+            )}
+          </div>
         </div>
       )
     },
@@ -195,7 +204,6 @@ export default function AdminCategoriasPage() {
       header: "Acciones",
       className: "text-right w-28",
       cell: (cat) => {
-        // Validación de permisos
         if (!user?.is_superuser) {
           return (
             <div className="flex justify-end pr-2 opacity-30" title="Solo administradores">
@@ -234,7 +242,7 @@ export default function AdminCategoriasPage() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
         <div className="space-y-1 w-full sm:w-auto">
           <button 
-            onClick={() => router.back()} 
+            onClick={() => router.push("/categorias")} 
             className="flex items-center gap-1 text-sm text-muted-foreground hover:text-primary transition-colors mb-2"
           >
             <ArrowLeftIcon className="h-3 w-3" /> Volver a Galería
@@ -243,7 +251,7 @@ export default function AdminCategoriasPage() {
             Administrar Categorías
           </h1>
           <p className="text-muted-foreground text-sm">
-            Gestiona las categorías disponibles para gastos.
+            Gestiona las categorías disponibles para gastos e ingresos.
           </p>
         </div>
         
@@ -256,19 +264,25 @@ export default function AdminCategoriasPage() {
               className="flex items-center gap-2 px-3 py-2 bg-secondary/20 rounded-lg border border-border cursor-pointer select-none hover:bg-secondary/30 transition-colors"
               onClick={() => setIsAdminView(!isAdminView)}
             >
-              <div className={`w-8 h-4 rounded-full relative transition-colors ${isAdminView ? 'bg-primary' : 'bg-gray-300'}`}>
-                <div className={`w-3 h-3 bg-white rounded-full absolute top-0.5 transition-transform ${isAdminView ? 'left-4.5 translate-x-4' : 'left-0.5 translate-x-0'}`} />
+              <div className={clsx(
+                  "w-8 h-4 rounded-full relative transition-colors",
+                  isAdminView ? "bg-primary" : "bg-gray-300 dark:bg-gray-600"
+              )}>
+                <div className={clsx(
+                    "w-3 h-3 bg-white rounded-full absolute top-0.5 transition-transform",
+                    isAdminView ? "left-4.5 translate-x-4" : "left-0.5 translate-x-0"
+                )} />
               </div>
               <span className="text-xs font-medium flex items-center gap-1.5">
                 {isAdminView ? (
                   <>
                     <EyeIcon className="h-3 w-3 text-primary" /> 
-                    Vista Global
+                    Global
                   </>
                 ) : (
                   <>
                     <EyeSlashIcon className="h-3 w-3 text-muted-foreground" /> 
-                    Vista Personal
+                    Personal
                   </>
                 )}
               </span>
@@ -284,9 +298,8 @@ export default function AdminCategoriasPage() {
       <Card>
         <CardHeader className="pb-3 border-b border-border mb-2 flex flex-row justify-between items-center">
           <CardTitle className="text-lg">Listado Maestro</CardTitle>
-          {/* Info badge del modo actual */}
           <span className="text-xs text-muted-foreground font-normal bg-muted px-2 py-1 rounded">
-            {isAdminView ? "Mostrando conteo total (Global)" : "Mostrando solo tus items (Personal)"}
+            {isAdminView ? "Conteo Total (Global)" : "Tus registros (Personal)"}
           </span>
         </CardHeader>
         <CardContent className="p-0 sm:p-0">
@@ -301,14 +314,20 @@ export default function AdminCategoriasPage() {
                   <TagIcon className="h-6 w-6" />
                 </div>
                 <h3 className="text-xl font-bold">{cat.name}</h3>
-                <div className="flex justify-center gap-4 text-sm text-muted-foreground">
-                   <span>ID: {cat.id.slice(0,8)}</span>
-                   <span>•</span>
-                   <span>{cat.items_count} elementos asociados</span>
+                <div className="flex justify-center gap-6 text-sm text-muted-foreground mt-2">
+                    <div className="text-center">
+                        <p className="text-xs uppercase tracking-wider">Gastos</p>
+                        <p className="text-lg font-bold text-orange-600">{cat.expenses_count}</p>
+                    </div>
+                    <div className="w-px bg-border h-10"></div>
+                    <div className="text-center">
+                        <p className="text-xs uppercase tracking-wider">Ingresos</p>
+                        <p className="text-lg font-bold text-green-600">{cat.incomes_count}</p>
+                    </div>
                 </div>
               </div>
             )}
-            modalTitle="Detalle de Categoría"
+            modalTitle="Resumen de Categoría"
           />
         </CardContent>
       </Card>
@@ -365,12 +384,12 @@ export default function AdminCategoriasPage() {
           <div className="bg-secondary/10 p-4 rounded-lg border border-border space-y-3">
             <div className="flex items-center gap-2 text-sm font-medium text-foreground">
               <ArrowPathIcon className="h-4 w-4 text-blue-500" />
-              Reasignación de gastos
+              Reasignación de datos
             </div>
             
             <div className="space-y-2">
               <label className="text-xs text-muted-foreground block">
-                Destino para los {currentCategory?.items_count} ítems afectados:
+                Destino para los <strong>{currentCategory?.total_items_count}</strong> registros afectados:
               </label>
               <select 
                 className="w-full p-2 text-sm rounded-md border border-border bg-background focus:ring-2 focus:ring-primary/50 outline-none"

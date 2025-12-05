@@ -1,23 +1,32 @@
-// frontend\src\app\login\page.tsx
+// frontend/src/app/login/page.tsx
+// frontend/src/app/login/page.tsx
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react'; // ✅ Agregamos useEffect
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import PrivacyModal from '@/components/PrivacyModal';
+import Link from 'next/link';
 
 export default function LoginPage() {
 
   const router = useRouter();
+  
+  // ✅ Obtenemos isAuth además del setToken
   const setToken = useAuthStore((state) => state.setToken);
+  const isAuth = useAuthStore((state) => state.isAuth);
 
   // Estados comunes
   const [isRegister, setIsRegister] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  
+  // Estado para el modal de privacidad
+  const [isPrivacyOpen, setIsPrivacyOpen] = useState(false);
 
   // Login states
   const [email, setEmail] = useState('');
@@ -29,6 +38,14 @@ export default function LoginPage() {
   const [regFirstName, setRegFirstName] = useState('');
   const [regLastName, setRegLastName] = useState('');
   const [regPhone, setRegPhone] = useState('');
+
+  // ✅ EFECTO DE REDIRECCIÓN AUTOMÁTICA
+  useEffect(() => {
+    if (isAuth) {
+      // Usamos replace para que no puedan volver atrás al login con el botón del navegador
+      router.replace('/gastos'); // Ajusta la ruta si es solo /gastos o /dashboard/gastos
+    }
+  }, [isAuth, router]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,11 +64,14 @@ export default function LoginPage() {
 
       const { access_token } = response.data;
       setToken(access_token);
-      router.push('/dashboard');
+      
+      // ✅ Fetch del usuario inmediatamente para tener los datos listos
+      await useAuthStore.getState().fetchUser();
+
+      router.push('/gastos'); // Redirigir a gastos tras login exitoso
     } catch (err: any) {
       setError('Credenciales incorrectas o error de conexión');
-    } finally {
-      setLoading(false);
+      setLoading(false); // Solo quitamos loading si falla, si no, esperamos a la redirección
     }
   };
 
@@ -74,7 +94,7 @@ export default function LoginPage() {
 
       setSuccess('¡Registro exitoso! Ya puedes iniciar sesión.');
       
-      // Limpiar formulario y volver al login automáticamente después de 2 segundos
+      // Limpiar formulario y volver al login automáticamente
       setTimeout(() => {
         setIsRegister(false);
         setRegEmail('');
@@ -93,8 +113,13 @@ export default function LoginPage() {
     }
   };
 
+  // Si ya está autenticado, retornamos null o un loader simple para evitar parpadeo del form
+  if (isAuth) {
+    return null; 
+  }
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-100 dark:bg-gray-950 transition-colors duration-300">
+    <div className="flex min-h-screen items-center justify-center bg-gray-100 dark:bg-gray-950 transition-colors duration-300 px-4">
       <div className="w-full max-w-md p-8 bg-white dark:bg-gray-900 rounded-lg shadow-md border border-gray-200 dark:border-gray-800 transition-all duration-300">
         
         {/* Título dinámico */}
@@ -186,6 +211,27 @@ export default function LoginPage() {
               />
             </div>
 
+            {/* CHECKBOX DE PRIVACIDAD */}
+            <div className="flex items-start gap-2 pt-2">
+              <input 
+                type="checkbox" 
+                id="terms" 
+                required 
+                className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+              />
+              <label htmlFor="terms" className="text-sm text-gray-600 dark:text-gray-400 cursor-pointer">
+                He leído y acepto la{' '}
+                <button
+                  type="button"
+                  onClick={() => setIsPrivacyOpen(true)}
+                  className="text-blue-600 dark:text-blue-400 hover:underline font-medium focus:outline-none"
+                >
+                  Política de Privacidad
+                </button>
+                {' '}y el procesamiento de mis datos personales.
+              </label>
+            </div>
+
             <Button
               type="submit"
               isLoading={loading}
@@ -255,6 +301,13 @@ export default function LoginPage() {
           </p>
         </div>
       </div>
+
+      {/* COMPONENTE MODAL */}
+      <PrivacyModal 
+        isOpen={isPrivacyOpen} 
+        onClose={() => setIsPrivacyOpen(false)} 
+      />
+
     </div>
   );
 }
