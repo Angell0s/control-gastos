@@ -21,40 +21,16 @@ async def read_ingresos(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Lista paginada de ingresos del usuario actual.
-    """
+    # selectinload(Ingreso.items) es crucial para traer los hijos en modo async
     query = (
         select(Ingreso)
         .where(Ingreso.user_id == current_user.id)
-        .options(selectinload(Ingreso.category)) # Carga ansiosa (Eager loading)
+        .options(selectinload(Ingreso.items)) 
         .offset(skip)
         .limit(limit)
     )
     result = await db.execute(query)
     return result.scalars().all()
-
-@router.get("/{id}", response_model=IngresoResponse)
-async def read_ingreso(
-    id: UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Obtener detalle de un ingreso por ID.
-    """
-    query = (
-        select(Ingreso)
-        .where(Ingreso.id == id, Ingreso.user_id == current_user.id)
-        .options(selectinload(Ingreso.category))
-    )
-    result = await db.execute(query)
-    ingreso = result.scalars().first()
-    
-    if not ingreso:
-        raise HTTPException(status_code=404, detail="Ingreso no encontrado")
-    
-    return ingreso
 
 @router.post("/", response_model=IngresoResponse, status_code=status.HTTP_201_CREATED)
 async def create_ingreso(
@@ -62,61 +38,70 @@ async def create_ingreso(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Crear nuevo ingreso y registrar en bitácora.
-    """
+    # 1. Calcular monto total basado en los items
+    total_amount = sum(item.monto for item in ingreso_in.items)
+
+    # 2. Crear instancia del Padre
     new_ingreso = Ingreso(
-        **ingreso_in.model_dump(),
-        user_id=current_user.id
+        user_id=current_user.id,
+        descripcion=ingreso_in.descripcion,
+        fecha=ingreso_in.fecha,
+        fuente=ingreso_in.fuente,
+        monto_total=total_amount
     )
     
+    # 3. Agregar a la sesión para generar el ID (aunque UUID se genera auto, SQLAlchemy necesita trackearlo)
     db.add(new_ingreso)
-    await db.commit()
-    await db.refresh(new_ingreso)
     
+    # 4. Crear instancias de los Hijos y vincularlos
+    for item_in in ingreso_in.items:
+        new_item = IngresoItem(
+            # Importante: No asignamos ingreso_id manualmente si usamos la relación ORM,
+            # pero asignarlo al padre .items.append es más seguro en ciertos contextos.
+            # Aquí usaremos la asignación directa al padre:
+            ingreso=new_ingreso, 
+            category_id=item_in.category_id,
+            descripcion=item_in.descripcion,
+            monto=item_in.monto
+        )
+        db.add(new_item)
+
+    # 5. Commit único (Atomicidad)
+    await db.commit()
+    
+    # 6. Refresh con carga de relaciones para devolver el JSON completo
+    # Es vital hacer selectinload aquí para que Pydantic pueda leer .items
+    query = select(Ingreso).where(Ingreso.id == new_ingreso.id).options(selectinload(Ingreso.items))
+    result = await db.execute(query)
+    ingreso_refreshed = result.scalars().first()
+
     # Auditoría
     await log_activity(
         db=db,
         user_id=current_user.id,
         action="CREATE_INGRESO",
         source="WEB",
-        details=f"Created Ingreso ID: {new_ingreso.id} Amount: {new_ingreso.monto}"
+        details=f"Ingreso creado con {len(ingreso_in.items)} items. Total: {total_amount}"
     )
     
-    return new_ingreso
+    return ingreso_refreshed
 
-@router.put("/{id}", response_model=IngresoResponse)
-async def update_ingreso(
+@router.get("/{id}", response_model=IngresoResponse)
+async def read_ingreso(
     id: UUID,
-    ingreso_in: IngresoUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Actualizar ingreso existente.
-    """
-    query = select(Ingreso).where(Ingreso.id == id, Ingreso.user_id == current_user.id)
+    query = (
+        select(Ingreso)
+        .where(Ingreso.id == id, Ingreso.user_id == current_user.id)
+        .options(selectinload(Ingreso.items)) # Cargar items
+    )
     result = await db.execute(query)
     ingreso = result.scalars().first()
     
     if not ingreso:
         raise HTTPException(status_code=404, detail="Ingreso no encontrado")
-    
-    update_data = ingreso_in.model_dump(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(ingreso, field, value)
-    
-    await db.commit()
-    await db.refresh(ingreso)
-    
-    # Auditoría
-    await log_activity(
-        db=db,
-        user_id=current_user.id,
-        action="UPDATE_INGRESO",
-        source="WEB",
-        details=f"Updated Ingreso ID: {id}"
-    )
     
     return ingreso
 
@@ -126,9 +111,7 @@ async def delete_ingreso(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Eliminar ingreso.
-    """
+    # Buscamos el ingreso
     query = select(Ingreso).where(Ingreso.id == id, Ingreso.user_id == current_user.id)
     result = await db.execute(query)
     ingreso = result.scalars().first()
@@ -136,10 +119,10 @@ async def delete_ingreso(
     if not ingreso:
         raise HTTPException(status_code=404, detail="Ingreso no encontrado")
     
+    # Al borrar el padre, cascade="all, delete-orphan" borrará los items automáticamente
     await db.delete(ingreso)
     await db.commit()
     
-    # Auditoría
     await log_activity(
         db=db,
         user_id=current_user.id,

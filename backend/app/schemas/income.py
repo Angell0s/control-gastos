@@ -1,36 +1,50 @@
 #backend\app\schemas\income.py
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Optional
+from typing import List, Optional
 from uuid import UUID
 from datetime import datetime
 
-# Base: Campos comunes
+# --- SCHEMAS DE ITEMS (HIJOS) ---
+
+class IngresoItemBase(BaseModel):
+    descripcion: str
+    monto: float = Field(..., gt=0)
+    category_id: UUID
+
+class IngresoItemCreate(IngresoItemBase):
+    pass
+
+class IngresoItemResponse(IngresoItemBase):
+    id: UUID
+    model_config = ConfigDict(from_attributes=True)
+
+
+# --- SCHEMAS DE INGRESO (PADRE) ---
+
 class IngresoBase(BaseModel):
     descripcion: str
     fecha: datetime
-    monto: float = Field(..., gt=0, description="Monto del ingreso debe ser positivo")
     fuente: str
-    category_id: UUID
 
-# Create: Campos necesarios para crear (id y user_id se manejan en backend)
 class IngresoCreate(IngresoBase):
-    pass
+    # Recibimos una lista de items al crear
+    items: List[IngresoItemCreate]
 
-# Update: Todos los campos opcionales
 class IngresoUpdate(BaseModel):
     descripcion: Optional[str] = None
     fecha: Optional[datetime] = None
-    monto: Optional[float] = None
     fuente: Optional[str] = None
-    category_id: Optional[UUID] = None
-    updated_at: Optional[datetime] = None # Permitir actualización manual si se requiere
-
-# Response: Retorno completo a la API
+    # Actualizar items es complejo, usualmente se maneja en endpoints separados 
+    # o reemplazando la lista completa.
+    
 class IngresoResponse(IngresoBase):
     id: UUID
     user_id: UUID
+    monto_total: float # Se devuelve el calculado/persistido
     created_at: datetime
     updated_at: datetime
     
-    # Configuración para leer desde objetos ORM
+    # Devolvemos los detalles anidados
+    items: List[IngresoItemResponse]
+    
     model_config = ConfigDict(from_attributes=True)
