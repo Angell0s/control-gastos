@@ -1,7 +1,7 @@
-//frontend\src\components\ui\Sidebar.tsx
+// frontend/src/components/ui/Sidebar.tsx
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react"; // Añadido useEffect
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
@@ -33,18 +33,17 @@ import { useAuthStore } from "@/store/authStore";
 import { useUIStore } from "@/store/uiStore";
 import { ThemeToggle } from "./ThemeToggle";
 
-// --- TIPOS DE NAVEGACIÓN ---
+// --- TIPOS DE NAVEGACIÓN (Sin cambios) ---
 type NavItem = {
   name: string;
   href: string;
   icon: (props: React.ComponentProps<'svg'>) => JSX.Element;
   requiredPermission?: 'superuser';
-  // ✅ NUEVO: Soporte para sub-menús
   children?: {
     name: string;
     href: string;
     icon?: (props: React.ComponentProps<'svg'>) => JSX.Element;
-    action?: string; // Para identificar acciones especiales (abrir modal)
+    action?: string;
   }[];
 };
 
@@ -66,8 +65,8 @@ const navigation: NavItem[] = [
   { name: "Bitácora", href: "/bitacora", icon: ClipboardDocumentListIcon, requiredPermission: 'superuser' },
 ];
 
-// --- COMPONENTE DE DETALLE DE USUARIO (SIN CAMBIOS) ---
-const UserProfileDetail = ({ user }: { user: any }) => (
+// --- COMPONENTE DE DETALLE DE USUARIO + BOTÓN CERRAR SESIÓN (MÓVIL) ---
+const UserProfileDetail = ({ user, onLogout }: { user: any, onLogout: () => void }) => (
   <div className="space-y-6">
     {/* Header Avatar */}
     <div className="flex flex-col items-center justify-center pb-6 border-b border-border relative">
@@ -85,7 +84,8 @@ const UserProfileDetail = ({ user }: { user: any }) => (
 
     {/* Detalles */}
     <div className="grid grid-cols-1 gap-4">
-      <div className="space-y-3">
+       {/* ... Sección Info Contacto (Sin cambios) ... */}
+       <div className="space-y-3">
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pl-1">
           Información de Contacto
         </h3>
@@ -125,6 +125,18 @@ const UserProfileDetail = ({ user }: { user: any }) => (
           </div>
         </div>
       </div>
+
+      {/* BOTÓN CERRAR SESIÓN (SOLO VISIBLE EN MÓVIL DENTRO DEL MODAL) */}
+      <div className="lg:hidden pt-4 border-t border-border mt-4">
+        <Button 
+            variant="destructive" 
+            className="w-full flex items-center justify-center gap-2"
+            onClick={onLogout}
+        >
+            <ArrowLeftStartOnRectangleIcon className="h-5 w-5" />
+            Cerrar Sesión
+        </Button>
+      </div>
     </div>
   </div>
 );
@@ -135,11 +147,8 @@ export function Sidebar() {
   const pathname = usePathname();
   
   // Estados UI
-  const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
-  
-  // ✅ NUEVO: Estado para controlar qué submenú está abierto
-  // Guardamos el 'name' del item padre desplegado.
   const [openSubmenu, setOpenSubmenu] = useState<string | null>("Mis Gastos"); 
 
   const { setTheme } = useTheme();
@@ -147,12 +156,25 @@ export function Sidebar() {
   const { isSidebarCollapsed, toggleSidebar } = useUIStore();
 
   const handleLogout = () => {
+    setIsProfileModalOpen(false); // Cerrar modal si estaba abierto
+    setIsMobileMenuOpen(false); // Cerrar menú si estaba abierto
     logout();
     setTheme("system");
     router.push("/login");
   };
 
-  // --- LÓGICA DE USUARIO ---
+  // Cerrar menú móvil automáticamente al cambiar de ruta
+  useEffect(() => {
+     setIsMobileMenuOpen(false);
+  }, [pathname]);
+
+  // Función helper para navegar y cerrar menú
+  const handleMobileNavigation = (href?: string) => {
+      setIsMobileMenuOpen(false);
+      if(href) router.push(href);
+  };
+
+  // Helpers de usuario
   const displayName = user?.first_name && user?.last_name
       ? `${user.first_name} ${user.last_name}`
       : user?.email || "Cargando...";
@@ -161,206 +183,269 @@ export function Sidebar() {
       ? (user.first_name[0] + user.last_name[0]).toUpperCase()
       : user?.email?.slice(0, 2).toUpperCase() || "US";
 
-  // --- FILTRADO DE NAVEGACIÓN ---
+  // Filtro permisos
   const filteredNavigation = navigation.filter(item => {
     if (!item.requiredPermission) return true;
     if (item.requiredPermission === 'superuser') return user?.is_superuser === true;
     return false;
   });
 
-  // --- TOGGLE SUBMENU ---
   const toggleSubmenu = (itemName: string) => {
     if (isSidebarCollapsed) {
-      toggleSidebar(); // Si está colapsado, abrir sidebar para ver submenú
+      toggleSidebar(); 
       setOpenSubmenu(itemName);
     } else {
       setOpenSubmenu(prev => (prev === itemName ? null : itemName));
     }
   };
 
+  // --- RENDER NAV ITEMS ---
+  const renderNavItems = (isMobile: boolean) => (
+    <ul className="space-y-1">
+      {filteredNavigation.map((item) => {
+        const isActive = pathname === item.href;
+        const hasChildren = !!item.children;
+        const isOpen = openSubmenu === item.name;
+
+        return (
+          <li key={item.name}>
+            {hasChildren ? (
+              <>
+                <button
+                  onClick={() => toggleSubmenu(item.name)}
+                  className={cn(
+                    "w-full group flex items-center rounded-md transition-all duration-200 relative overflow-hidden",
+                    (isSidebarCollapsed && !isMobile) ? "justify-center p-2" : "px-3 py-2 justify-between",
+                    isActive || isOpen ? "text-foreground bg-accent/50" : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  )}
+                >
+                  <div className="flex items-center">
+                    <item.icon className={cn("flex-shrink-0 transition-all", (isSidebarCollapsed && !isMobile) ? "h-6 w-6" : "h-5 w-5 mr-3", (isActive || isOpen) ? "text-primary" : "")} />
+                    <span className={cn("text-sm whitespace-nowrap transition-all duration-300", (isSidebarCollapsed && !isMobile) ? "w-0 opacity-0 hidden" : "w-auto opacity-100 block")}>
+                      {item.name}
+                    </span>
+                  </div>
+                  {(!isSidebarCollapsed || isMobile) && (
+                    <ChevronDownIcon className={cn("h-3 w-3 transition-transform duration-200", isOpen ? "rotate-180" : "")} />
+                  )}
+                </button>
+                
+                {isOpen && (!isSidebarCollapsed || isMobile) && (
+                  <div className="mt-1 ml-4 pl-2 border-l border-border space-y-1 animate-in slide-in-from-top-1 duration-200">
+                    {item.children!.map((subItem) => {
+                      const isSubActive = pathname === subItem.href.split('?')[0] && (!subItem.action || pathname.includes("action"));
+                      return (
+                        <Link
+                          key={subItem.name}
+                          href={subItem.href}
+                          onClick={() => isMobile && setIsMobileMenuOpen(false)}
+                          className={cn(
+                            "flex items-center px-3 py-1.5 text-sm rounded-md transition-colors",
+                            isSubActive 
+                              ? "text-primary font-medium bg-primary/5" 
+                              : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                          )}
+                        >
+                          {subItem.icon && <subItem.icon className="h-4 w-4 mr-2 opacity-70" />}
+                          {subItem.name}
+                        </Link>
+                      )
+                    })}
+                  </div>
+                )}
+              </>
+            ) : (
+              <Link
+                href={item.href}
+                onClick={() => isMobile && setIsMobileMenuOpen(false)}
+                className={cn(
+                  "group flex items-center rounded-md transition-all duration-300 relative overflow-hidden",
+                  (isSidebarCollapsed && !isMobile) ? "justify-center p-2" : "px-3 py-2",
+                  isActive ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                )}
+              >
+                {(isActive && !isSidebarCollapsed && !isMobile) && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-primary rounded-r-full" />}
+                <item.icon className={cn("flex-shrink-0 transition-all", (isSidebarCollapsed && !isMobile) ? "h-6 w-6" : "h-5 w-5 mr-3", isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground")} />
+                <span className={cn("text-sm whitespace-nowrap transition-all duration-300", (isSidebarCollapsed && !isMobile) ? "w-0 opacity-0 hidden" : "w-auto opacity-100 block")}>
+                  {item.name}
+                </span>
+              </Link>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+
+  // Helper Bottom Nav
+  const BottomNavItem = ({ icon: Icon, label, href, isActive, onClick }: any) => (
+    <div 
+      onClick={() => {
+        if (onClick) onClick();
+        else if (href) handleMobileNavigation(href);
+      }}
+      className={cn(
+        "flex flex-col items-center justify-center w-full h-full space-y-1 cursor-pointer active:scale-95 transition-transform select-none",
+        isActive ? "text-primary" : "text-muted-foreground hover:text-foreground"
+      )}
+    >
+       <Icon className="h-6 w-6" />
+       <span className="text-[10px] font-medium">{label}</span>
+    </div>
+  );
+
   return (
     <>
-      {/* --- MOBILE TOGGLE --- */}
-      <div className="lg:hidden fixed top-4 left-4 z-50">
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={() => setIsMobileOpen(!isMobileOpen)}
-          className="bg-card shadow-md border-border"
-        >
-          {isMobileOpen ? <XMarkIcon className="h-6 w-6" /> : <Bars3Icon className="h-6 w-6" />}
-        </Button>
+      {/* ==========================================
+          MOBILE DRAWER (Menú Expandible)
+         ========================================== */}
+      
+      {/* 1. Backdrop */}
+      <div
+          className={cn(
+            "fixed inset-0 bg-black/60 z-[35] lg:hidden transition-opacity duration-300 backdrop-blur-sm",
+            isMobileMenuOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
+          )}
+          onClick={() => setIsMobileMenuOpen(false)}
+      />
+
+      {/* 2. Drawer Container */}
+      <div 
+        className={cn(
+          "fixed bottom-[64px] left-0 right-0 bg-card z-[36] lg:hidden",
+          "rounded-t-2xl border-t border-border shadow-[0_-4px_20px_rgba(0,0,0,0.2)]",
+          "flex flex-col max-h-[80vh] overflow-hidden",
+          // ANIMACIÓN CRÍTICA: Siempre tiene transition, solo cambia el translate
+          "transition-transform duration-300 ease-out will-change-transform",
+          isMobileMenuOpen ? "translate-y-0" : "translate-y-[150%]"
+        )}
+      >
+         <div className="w-full flex justify-center pt-3 pb-1 cursor-grab active:cursor-grabbing" onClick={() => setIsMobileMenuOpen(false)}>
+           <div className="w-12 h-1.5 rounded-full bg-muted hover:bg-muted-foreground/50 transition-colors" />
+         </div>
+
+         <div className="px-4 py-2 flex items-center justify-between border-b border-border/50">
+            <span className="text-sm font-bold text-muted-foreground uppercase tracking-wider">Menú</span>
+            <Button variant="ghost" size="sm" onClick={() => setIsMobileMenuOpen(false)} className="h-8 w-8 p-0 rounded-full">
+               <XMarkIcon className="h-5 w-5" />
+            </Button>
+         </div>
+
+         <div className="overflow-y-auto p-4 space-y-4 custom-scrollbar pb-8">
+            <nav>{renderNavItems(true)}</nav>
+            
+            <div className="pt-4 border-t border-border space-y-3">
+                <div className="flex items-center justify-between px-2">
+                   <span className="text-sm font-medium">Tema</span>
+                   <ThemeToggle showLabel={false} />
+                </div>
+                {/* Botón de cerrar sesión MOVIDO al modal de perfil, aquí solo dejamos ThemeToggle o enlaces extras */}
+            </div>
+         </div>
       </div>
 
-      {/* --- MOBILE OVERLAY --- */}
-      {isMobileOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 z-40 lg:hidden backdrop-blur-sm"
-          onClick={() => setIsMobileOpen(false)}
-        />
-      )}
+      {/* ==========================================
+          BOTTOM NAVIGATION BAR (Fija)
+         ========================================== */}
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 h-16 bg-card/95 backdrop-blur-md border-t border-border flex justify-around items-center px-2 pb-safe shadow-[0_-1px_2px_rgba(0,0,0,0.05)]">
+        
+        <BottomNavItem icon={HomeIcon} label="Inicio" href="/dashboard" isActive={pathname === "/dashboard"} />
+        
+        <BottomNavItem icon={ArrowTrendingUpIcon} label="Ingresos" href="/ingresos" isActive={pathname.startsWith("/ingresos")} />
+        
+        <BottomNavItem icon={BanknotesIcon} label="Gastos" href="/gastos" isActive={pathname.startsWith("/gastos")} />
+        
+        {/* Perfil Button */}
+        <div 
+          onClick={() => {
+             setIsMobileMenuOpen(false); // Cerrar menú si está abierto
+             user && setIsProfileModalOpen(true);
+          }}
+          className="flex flex-col items-center justify-center w-full h-full space-y-1 cursor-pointer active:scale-95 transition-transform"
+        >
+          <div className={cn(
+              "h-6 w-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white shadow-sm bg-gradient-to-tr from-blue-500 to-purple-500 transition-all",
+              pathname === "/profile" ? "ring-2 ring-primary ring-offset-1" : ""
+            )}
+          >
+            {initials}
+          </div>
+          <span className="text-[10px] font-medium text-muted-foreground">Perfil</span>
+        </div>
 
-      {/* --- SIDEBAR ASIDE --- */}
+        {/* Menu Button */}
+        <BottomNavItem 
+          icon={isMobileMenuOpen ? ChevronDownIcon : Bars3Icon} 
+          label={isMobileMenuOpen ? "Cerrar" : "Menú"} 
+          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+          isActive={isMobileMenuOpen} 
+        />
+      </div>
+
+
+      {/* ==========================================
+          DESKTOP SIDEBAR
+         ========================================== */}
       <aside
         className={cn(
-          "fixed top-0 left-0 z-40 h-screen bg-card border-r border-border shadow-xl lg:shadow-none",
-          "transition-all duration-300 ease-in-out flex flex-col",
-          isSidebarCollapsed ? "w-20" : "w-64",
-          isMobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+          "hidden lg:flex fixed top-0 left-0 z-40 h-screen bg-card border-r border-border shadow-xl lg:shadow-none",
+          "transition-all duration-300 ease-in-out flex-col",
+          isSidebarCollapsed ? "w-20" : "w-64"
         )}
       >
         {/* Botón Colapsar Desktop */}
         <div className="hidden lg:flex absolute -right-3 top-9 z-50">
-          <Button
-            onClick={toggleSidebar}
-            size="icon"
-            variant="outline"
-            className="h-6 w-6 rounded-full bg-card border border-border shadow-sm hover:bg-accent p-0"
-          >
+          <Button onClick={toggleSidebar} size="icon" variant="outline" className="h-6 w-6 rounded-full bg-card border border-border shadow-sm hover:bg-accent p-0">
             {isSidebarCollapsed ? <ChevronRightIcon className="h-3 w-3" /> : <ChevronLeftIcon className="h-3 w-3" />}
           </Button>
         </div>
 
-        {/* CONTENIDO SCROLLABLE */}
-        <div className="flex flex-col h-full py-4 overflow-y-auto overflow-x-hidden custom-scrollbar">
-          
-          {/* LOGO */}
-          <div className={cn("mb-6 flex items-center px-4 h-10 transition-all duration-500", isSidebarCollapsed ? "justify-center" : "justify-start")}>
-            <div className="h-8 w-8 rounded-lg bg-primary flex flex-shrink-0 items-center justify-center text-primary-foreground font-bold shadow-lg shadow-primary/30">
-              $
-            </div>
-            <div className={cn("ml-3 overflow-hidden whitespace-nowrap transition-all duration-300 ease-in-out", isSidebarCollapsed ? "w-0 opacity-0" : "w-auto opacity-100 delay-200")}>
-              <h1 className="text-lg font-bold text-foreground">MisGastos</h1>
-            </div>
+        {/* LOGO */}
+        <div className={cn("mb-6 flex items-center px-4 h-10 transition-all duration-500 mt-4", isSidebarCollapsed ? "justify-center" : "justify-start")}>
+          <div className="h-8 w-8 rounded-lg bg-primary flex flex-shrink-0 items-center justify-center text-primary-foreground font-bold shadow-lg shadow-primary/30">
+            $
+          </div>
+          <div className={cn("ml-3 overflow-hidden whitespace-nowrap transition-all duration-300 ease-in-out", isSidebarCollapsed ? "w-0 opacity-0" : "w-auto opacity-100 delay-200")}>
+            <h1 className="text-lg font-bold text-foreground">MisGastos</h1>
+          </div>
+        </div>
+
+        {/* NAVEGACIÓN */}
+        <div className="flex-1 space-y-1 px-3 overflow-y-auto custom-scrollbar">
+          <p className={cn("px-2 text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2 whitespace-nowrap transition-all duration-300", isSidebarCollapsed ? "w-0 opacity-0 translate-x-[-10px]" : "w-auto opacity-100 translate-x-0 delay-200")}>
+            Menu Principal
+          </p>
+          {renderNavItems(false)}
+        </div>
+
+        {/* FOOTER */}
+        <div className="mt-auto border-t border-border px-3 pt-3 pb-2 space-y-1 bg-card">
+          <div className={cn("flex transition-all duration-500", isSidebarCollapsed ? "justify-center mb-2" : "mb-1")}>
+            <ThemeToggle showLabel={!isSidebarCollapsed} />
           </div>
 
-          {/* NAVEGACIÓN */}
-          <nav className="flex-1 space-y-1 px-3">
-            <p className={cn("px-2 text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2 whitespace-nowrap transition-all duration-300", isSidebarCollapsed ? "w-0 opacity-0 translate-x-[-10px]" : "w-auto opacity-100 translate-x-0 delay-200")}>
-              Menu Principal
-            </p>
-            
-            <ul className="space-y-1">
-              {filteredNavigation.map((item) => {
-                const isActive = pathname === item.href;
-                const hasChildren = !!item.children;
-                const isOpen = openSubmenu === item.name;
+          <Button variant="ghost" size="sm" className={cn("w-full group text-muted-foreground hover:bg-destructive/10 hover:text-destructive h-9", isSidebarCollapsed ? "justify-center px-0" : "justify-start px-2")} onClick={handleLogout} title="Cerrar Sesión">
+            <ArrowLeftStartOnRectangleIcon className={cn("h-5 w-5", isSidebarCollapsed ? "" : "mr-2")} />
+            <span className={cn("text-sm whitespace-nowrap", isSidebarCollapsed ? "hidden" : "block")}>Cerrar Sesión</span>
+          </Button>
 
-                return (
-                  <li key={item.name}>
-                    {/* --- ÍTEM PADRE --- */}
-                    {hasChildren ? (
-                      // Si tiene hijos, es un botón desplegable
-                      <button
-                        onClick={() => toggleSubmenu(item.name)}
-                        className={cn(
-                          "w-full group flex items-center rounded-md transition-all duration-200 relative overflow-hidden",
-                          isSidebarCollapsed ? "justify-center p-2" : "px-3 py-2 justify-between",
-                          isActive || isOpen ? "text-foreground bg-accent/50" : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                        )}
-                        title={isSidebarCollapsed ? item.name : ""}
-                      >
-                        <div className="flex items-center">
-                          <item.icon className={cn("flex-shrink-0 transition-all", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5 mr-3", (isActive || isOpen) ? "text-primary" : "")} />
-                          <span className={cn("text-sm whitespace-nowrap transition-all duration-300", isSidebarCollapsed ? "w-0 opacity-0 hidden" : "w-auto opacity-100 block")}>
-                            {item.name}
-                          </span>
-                        </div>
-                        {/* Flecha de desplegable (solo visible si no está colapsado) */}
-                        {!isSidebarCollapsed && (
-                          <ChevronDownIcon className={cn("h-3 w-3 transition-transform duration-200", isOpen ? "rotate-180" : "")} />
-                        )}
-                      </button>
-                    ) : (
-                      // Si no tiene hijos, es un Link normal
-                      <Link
-                        href={item.href}
-                        onClick={() => setIsMobileOpen(false)}
-                        className={cn(
-                          "group flex items-center rounded-md transition-all duration-300 relative overflow-hidden",
-                          isSidebarCollapsed ? "justify-center p-2" : "px-3 py-2",
-                          isActive ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                        )}
-                        title={isSidebarCollapsed ? item.name : ""}
-                      >
-                        {isActive && !isSidebarCollapsed && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-primary rounded-r-full" />}
-                        <item.icon className={cn("flex-shrink-0 transition-all", isSidebarCollapsed ? "h-6 w-6" : "h-5 w-5 mr-3", isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground")} />
-                        <span className={cn("text-sm whitespace-nowrap transition-all duration-300", isSidebarCollapsed ? "w-0 opacity-0 hidden" : "w-auto opacity-100 block")}>
-                          {item.name}
-                        </span>
-                      </Link>
-                    )}
-
-                    {/* --- SUBMENÚ DESPLEGABLE --- */}
-                    {hasChildren && isOpen && !isSidebarCollapsed && (
-                      <div className="mt-1 ml-4 pl-2 border-l border-border space-y-1 animate-in slide-in-from-top-1 duration-200">
-                        {item.children!.map((subItem) => {
-                          const isSubActive = pathname === subItem.href.split('?')[0] && (!subItem.action || pathname.includes("action")); // Lógica simple
-                          return (
-                            <Link
-                              key={subItem.name}
-                              href={subItem.href}
-                              onClick={() => setIsMobileOpen(false)}
-                              className={cn(
-                                "flex items-center px-3 py-1.5 text-sm rounded-md transition-colors",
-                                isSubActive 
-                                  ? "text-primary font-medium bg-primary/5" 
-                                  : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
-                              )}
-                            >
-                              {subItem.icon && <subItem.icon className="h-4 w-4 mr-2 opacity-70" />}
-                              {subItem.name}
-                            </Link>
-                          )
-                        })}
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          </nav>
-
-          {/* FOOTER */}
-          <div className="mt-auto border-t border-border px-3 pt-3 pb-2 space-y-1 bg-card">
-            <div className={cn("flex transition-all duration-500", isSidebarCollapsed ? "justify-center mb-2" : "mb-1")}>
-              <ThemeToggle showLabel={!isSidebarCollapsed} />
+          <div onClick={() => user && setIsProfileModalOpen(true)} className={cn("mt-2 flex items-center rounded-lg bg-secondary/50 border border-border cursor-pointer hover:bg-secondary hover:border-primary/30 transition-all mb-2", isSidebarCollapsed ? "justify-center p-1 h-10 w-10 mx-auto" : "p-2 gap-3")}>
+            <div className="h-8 w-8 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 flex items-center justify-center text-xs font-bold text-white shadow-sm">
+              {initials}
             </div>
-
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn("w-full group text-muted-foreground hover:bg-destructive/10 hover:text-destructive h-9", isSidebarCollapsed ? "justify-center px-0" : "justify-start px-2")}
-              onClick={handleLogout}
-              title={isSidebarCollapsed ? "Cerrar Sesión" : ""}
-            >
-              <ArrowLeftStartOnRectangleIcon className={cn("h-5 w-5", isSidebarCollapsed ? "" : "mr-2")} />
-              <span className={cn("text-sm whitespace-nowrap", isSidebarCollapsed ? "hidden" : "block")}>Cerrar Sesión</span>
-            </Button>
-
-            <div
-              onClick={() => user && setIsProfileModalOpen(true)}
-              className={cn(
-                "mt-2 flex items-center rounded-lg bg-secondary/50 border border-border cursor-pointer hover:bg-secondary hover:border-primary/30 transition-all",
-                isSidebarCollapsed ? "justify-center p-1 h-10 w-10 mx-auto" : "p-2 gap-3"
-              )}
-            >
-              <div className="h-8 w-8 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 flex items-center justify-center text-xs font-bold text-white shadow-sm">
-                {initials}
-              </div>
-              <div className={cn("overflow-hidden", isSidebarCollapsed ? "hidden" : "block")}>
-                <p className="text-xs font-semibold text-foreground truncate w-32">{displayName}</p>
-                <p className="text-[10px] text-muted-foreground truncate w-32">{user?.email}</p>
-              </div>
+            <div className={cn("overflow-hidden", isSidebarCollapsed ? "hidden" : "block")}>
+              <p className="text-xs font-semibold text-foreground truncate w-32">{displayName}</p>
+              <p className="text-[10px] text-muted-foreground truncate w-32">{user?.email}</p>
             </div>
           </div>
         </div>
       </aside>
 
-      {/* MODAL DE PERFIL PROPIO */}
+      {/* MODAL DE PERFIL (COMPARTIDO) */}
       {user && (
         <Modal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} title="Mi Perfil">
-          <UserProfileDetail user={user} />
+          {/* Pasamos handleLogout al componente para usarlo en el botón móvil */}
+          <UserProfileDetail user={user} onLogout={handleLogout} />
         </Modal>
       )}
     </>

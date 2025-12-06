@@ -5,10 +5,14 @@ import { useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/authStore";
 import api from "@/lib/api";
+import { cn } from "@/lib/utils"; 
 import { DataTable, ColumnDef } from "@/components/DataTable";
 import { Modal } from "@/components/Modal";
 import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input"; 
+import { Tooltip } from "@/components/ui/Tooltip"; 
 import { Card, CardContent } from "@/components/ui/Card";
+import { AsyncSearchSelect } from "@/components/ui/AsyncSearchSelect"; 
 import { 
   BanknotesIcon, 
   PlusIcon, 
@@ -16,12 +20,12 @@ import {
   PencilSquareIcon, 
   CalendarIcon, 
   ShoppingBagIcon,
-  ExclamationTriangleIcon // Para la advertencia
+  ExclamationTriangleIcon,
+  DocumentTextIcon
 } from "@heroicons/react/24/outline";
 import { toast } from "sonner";
 
 // --- TIPOS ---
-
 interface Category {
   id: string;
   name: string;
@@ -33,7 +37,6 @@ interface ExpenseItem {
   name: string;
   amount: number;
   quantity: number;
-  // ✅ Campo temporal para guardar el nombre de la nueva categoría si se está creando
   new_category_name?: string; 
 }
 
@@ -65,7 +68,6 @@ const initialForm: ExpenseFormData = {
   items: [{ ...initialItem }]
 };
 
-// ID ficticio para identificar la acción de crear nueva
 const NEW_CATEGORY_OPTION_ID = "NEW_CATEGORY_OPTION";
 
 export default function GastosPage() {
@@ -82,9 +84,12 @@ export default function GastosPage() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   
-  // ✅ Estado para modal de confirmación de creación de categoría
   const [isCategoryConfirmOpen, setIsCategoryConfirmOpen] = useState(false);
   const [pendingSubmitEvent, setPendingSubmitEvent] = useState<React.FormEvent | null>(null);
+
+  // ✅ ESTADOS PARA ERRORES (Set de índices de fila)
+  const [priceErrors, setPriceErrors] = useState<Set<number>>(new Set());
+  const [nameErrors, setNameErrors]   = useState<Set<number>>(new Set()); // Nuevo para nombres
 
   const [currentExpense, setCurrentExpense] = useState<Expense | null>(null);
   const [formData, setFormData] = useState<ExpenseFormData>(initialForm);
@@ -120,10 +125,11 @@ export default function GastosPage() {
   }, [searchParams, categories]);
 
   // --- HANDLERS ---
-
   const handleOpenCreate = () => {
     setCurrentExpense(null);
-    const defaultCatId = categories.length > 0 ? categories[0].id : "";
+    setPriceErrors(new Set());
+    setNameErrors(new Set()); // Limpiar errores
+    const defaultCatId = ""; 
     setFormData({
       date: new Date().toISOString().split('T')[0],
       notes: "",
@@ -134,6 +140,8 @@ export default function GastosPage() {
 
   const handleOpenEdit = (expense: Expense) => {
     setCurrentExpense(expense);
+    setPriceErrors(new Set());
+    setNameErrors(new Set()); // Limpiar errores
     setFormData({
       date: expense.date.split('T')[0],
       notes: expense.notes || "",
@@ -155,12 +163,10 @@ export default function GastosPage() {
   };
 
   // --- LÓGICA DE ITEMS ---
-  
   const addItemRow = () => {
-    const defaultCatId = categories.length > 0 ? categories[0].id : "";
     setFormData(prev => ({
       ...prev,
-      items: [...prev.items, { ...initialItem, category_id: defaultCatId }]
+      items: [...prev.items, { ...initialItem }]
     }));
   };
 
@@ -170,14 +176,45 @@ export default function GastosPage() {
       ...prev,
       items: prev.items.filter((_, i) => i !== index)
     }));
+    
+    // Limpiar errores al borrar la fila
+    setPriceErrors(prev => {
+        const next = new Set(prev);
+        next.delete(index);
+        return next;
+    });
+    setNameErrors(prev => {
+        const next = new Set(prev);
+        next.delete(index);
+        return next;
+    });
   };
 
   const updateItem = (index: number, field: keyof ExpenseItem, value: any) => {
     const newItems = [...formData.items];
     
-    // Lógica especial para resetear new_category_name si cambian a una categoría existente
     if (field === "category_id" && value !== NEW_CATEGORY_OPTION_ID) {
         newItems[index].new_category_name = "";
+    }
+
+    // Limpiar error de PRECIO si se corrige
+    if (field === "amount" && value > 0) {
+         setPriceErrors(prev => {
+            if (!prev.has(index)) return prev;
+            const next = new Set(prev);
+            next.delete(index);
+            return next;
+         });
+    }
+
+    // Limpiar error de NOMBRE si se corrige
+    if (field === "name" && value.toString().trim() !== "") {
+         setNameErrors(prev => {
+            if (!prev.has(index)) return prev;
+            const next = new Set(prev);
+            next.delete(index);
+            return next;
+         });
     }
 
     // @ts-ignore
@@ -189,67 +226,77 @@ export default function GastosPage() {
     return formData.items.reduce((acc, item) => acc + (item.amount * item.quantity), 0);
   };
 
-  // --- LÓGICA DE SUBMIT E INTERCEPCIÓN ---
-
-  // 1. Interceptor del Submit
+  // --- SUBMIT ---
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Validaciones básicas
-    if (formData.items.some(i => !i.name || i.amount <= 0)) {
-        toast.warning("Nombre y Monto son obligatorios.");
-        return;
+    let hasErrors = false;
+
+    // 1. Validación de NOMBRES
+    const newNameErrors = new Set<number>();
+    formData.items.forEach((item, idx) => {
+        if (!item.name.trim()) {
+            newNameErrors.add(idx);
+            hasErrors = true;
+        }
+    });
+    setNameErrors(newNameErrors);
+
+    // 2. Validación de PRECIOS
+    const newPriceErrors = new Set<number>();
+    formData.items.forEach((item, idx) => {
+        if (item.amount <= 0) {
+            newPriceErrors.add(idx);
+            hasErrors = true;
+        }
+    });
+    setPriceErrors(newPriceErrors);
+
+    if (hasErrors) {
+        toast.error("Por favor, completa los campos requeridos.");
+        return; // 🛑 DETENER SUBMIT
     }
 
-    // Verificar si hay categorías nuevas pendientes
+    // 3. Verificar Categorías Nuevas
     const hasNewCategories = formData.items.some(
         item => item.category_id === NEW_CATEGORY_OPTION_ID && item.new_category_name?.trim()
     );
 
     if (hasNewCategories) {
-        // Si hay nuevas, detenemos el proceso y pedimos confirmación
-        setPendingSubmitEvent(e); // Guardamos el evento (simbólico, realmente el estado formData)
+        setPendingSubmitEvent(e); 
         setIsCategoryConfirmOpen(true);
     } else {
-        // Si no hay nuevas, procedemos directo
         processFinalSubmit();
     }
   };
 
-  // 2. Proceso real de guardado (llamado tras confirmar o directo)
   const processFinalSubmit = async () => {
     setIsSubmitting(true);
-    setIsCategoryConfirmOpen(false); // Cerrar modal de confirmación si estaba abierto
+    setIsCategoryConfirmOpen(false);
 
     try {
-        // A. Crear categorías nuevas si existen
-        // Necesitamos un mapa para actualizar los items con los nuevos IDs reales
         const itemsToProcess = [...formData.items];
-        const newCategoriesMap = new Map<string, string>(); // nombre -> id_real
+        const newCategoriesMap = new Map<string, string>();
 
-        // Identificamos nombres únicos para no crear duplicados si el usuario puso la misma nueva cat 2 veces
         const uniqueNewNames = Array.from(new Set(
             itemsToProcess
                 .filter(i => i.category_id === NEW_CATEGORY_OPTION_ID && i.new_category_name)
                 .map(i => i.new_category_name!.trim())
         ));
 
-        // Creamos las categorías en el backend una por una
         for (const catName of uniqueNewNames) {
             try {
                 const res = await api.post<Category>("/categories/", { name: catName });
                 newCategoriesMap.set(catName, res.data.id);
-                // Actualizamos la lista local de categorías para que ya aparezcan
                 setCategories(prev => [...prev, res.data]);
             } catch (err) {
                 console.error(`Error creando categoría ${catName}`, err);
                 toast.error(`Error al crear categoría "${catName}".`);
                 setIsSubmitting(false);
-                return; // Abortamos todo si falla la creación de categoría
+                return;
             }
         }
 
-        // B. Reemplazar los IDs temporales por los reales en los items
         const finalItems = itemsToProcess.map(item => {
             if (item.category_id === NEW_CATEGORY_OPTION_ID && item.new_category_name) {
                 const realId = newCategoriesMap.get(item.new_category_name.trim());
@@ -257,24 +304,16 @@ export default function GastosPage() {
                     return {
                         ...item,
                         category_id: realId,
-                        new_category_name: undefined // Limpiamos
+                        new_category_name: undefined
                     };
                 }
             }
             return item;
         });
 
-        // Validar que no haya quedado ningún ID temporal (por si acaso)
-        if (finalItems.some(i => i.category_id === NEW_CATEGORY_OPTION_ID)) {
-            toast.error("Error interno asignando categorías.");
-            setIsSubmitting(false);
-            return;
-        }
-
-        // C. Guardar el Gasto
         const payload = {
             ...formData,
-            items: finalItems, // Usamos la lista con IDs corregidos
+            items: finalItems,
             date: new Date(formData.date).toISOString()
         };
 
@@ -405,7 +444,7 @@ export default function GastosPage() {
                   <span>${exp.total.toLocaleString("es-MX", {minimumFractionDigits: 2})}</span>
                 </div>
                 {exp.notes && (
-                   <p className="text-sm text-muted-foreground italic bg-gray-50 p-2 rounded">"{exp.notes}"</p>
+                    <p className="text-sm text-muted-foreground italic bg-gray-50 p-2 rounded">"{exp.notes}"</p>
                 )}
               </div>
             )}
@@ -429,20 +468,19 @@ export default function GastosPage() {
               <label className="text-sm font-medium flex items-center gap-2">
                 <CalendarIcon className="h-4 w-4" /> Fecha
               </label>
-              <input 
+              <Input 
                 type="date" 
                 required
-                className="w-full p-2 rounded border border-border bg-background focus:ring-2 focus:ring-primary/50 outline-none"
                 value={formData.date}
                 onChange={(e) => setFormData({...formData, date: e.target.value})}
               />
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Notas (Opcional)</label>
-              <input 
+              <Input 
                 type="text" 
                 placeholder="Ej: Compras de la semana..."
-                className="w-full p-2 rounded border border-border bg-background focus:ring-2 focus:ring-primary/50 outline-none"
+                icon={<DocumentTextIcon className="h-4 w-4" />}
                 value={formData.notes}
                 onChange={(e) => setFormData({...formData, notes: e.target.value})}
               />
@@ -466,7 +504,7 @@ export default function GastosPage() {
                   <thead className="bg-secondary/20 text-xs uppercase font-semibold text-muted-foreground">
                     <tr>
                       <th className="p-2 pl-4 min-w-[160px]">Producto</th>
-                      <th className="p-2 w-36 min-w-[150px]">Categoría</th>
+                      <th className="p-2 w-48 min-w-[180px]">Categoría</th>
                       <th className="p-2 w-20 text-center">Cant.</th>
                       <th className="p-2 w-28 text-right">Precio U.</th>
                       <th className="p-2 w-24 text-right">Subtotal</th>
@@ -476,45 +514,59 @@ export default function GastosPage() {
                   <tbody className="divide-y divide-border">
                     {formData.items.map((item, idx) => (
                       <tr key={idx} className="bg-background hover:bg-accent/5 align-top">
-                        <td className="p-2 pl-4">
-                          <input 
-                            type="text" 
-                            placeholder="Nombre..."
-                            required
-                            className="w-full bg-transparent outline-none border-b border-transparent focus:border-primary placeholder:text-muted-foreground/50 py-1"
-                            value={item.name}
-                            onChange={(e) => updateItem(idx, "name", e.target.value)}
-                          />
+                        
+                        {/* ✅ INPUT PRODUCTO CON TOOLTIP */}
+                        <td className="p-2 pl-4 relative">
+                          <Tooltip 
+                                text="¡Nombre requerido!" 
+                                show={nameErrors.has(idx)} 
+                                variant="error"
+                                className="mb-1"
+                            >
+                              <input 
+                                type="text" 
+                                placeholder="Nombre..."
+                                className={cn(
+                                    "w-full bg-transparent outline-none border-b border-transparent focus:border-primary placeholder:text-muted-foreground/50 py-2 transition-colors",
+                                    // Si hay error, borde rojo
+                                    nameErrors.has(idx) && "border-b-red-500 bg-red-50/10"
+                                )}
+                                value={item.name}
+                                onChange={(e) => updateItem(idx, "name", e.target.value)}
+                                // Limpiar error al foco
+                                onFocus={() => {
+                                    if(nameErrors.has(idx)) {
+                                        setNameErrors(prev => {
+                                            const next = new Set(prev);
+                                            next.delete(idx);
+                                            return next;
+                                        });
+                                    }
+                                }}
+                              />
+                          </Tooltip>
                         </td>
+
                         <td className="p-2">
-                          <div className="flex flex-col gap-1">
-                              <select 
-                                className="w-full bg-transparent outline-none text-xs truncate border-b border-transparent focus:border-primary py-1"
-                                value={item.category_id}
-                                required
-                                onChange={(e) => updateItem(idx, "category_id", e.target.value)}
-                              >
-                                 {categories.length === 0 && <option value="">Sin categorías</option>}
-                                 {categories.map(cat => (
-                                   <option key={cat.id} value={cat.id}>{cat.name}</option>
-                                 ))}
-                                 <option disabled>──────────</option>
-                                 {/* ✅ Opción Especial */}
-                                 <option value={NEW_CATEGORY_OPTION_ID}>✨ + Nueva Categoría</option>
-                              </select>
-                              
-                              {/* ✅ Input Condicional para Nueva Categoría */}
-                              {item.category_id === NEW_CATEGORY_OPTION_ID && (
-                                  <input 
-                                    type="text"
-                                    autoFocus
-                                    placeholder="Nombre nueva categoría..."
-                                    className="text-xs w-full p-1 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded text-blue-700 dark:text-blue-300 placeholder:text-blue-300 outline-none animate-in slide-in-from-top-1 duration-200"
-                                    value={item.new_category_name}
-                                    onChange={(e) => updateItem(idx, "new_category_name", e.target.value)}
-                                  />
-                              )}
-                          </div>
+                          <AsyncSearchSelect
+                            value={item.category_id || null}
+                            onChange={(newVal) => updateItem(idx, "category_id", newVal)}
+                            fetchUrl="/categories/"
+                            queryParam="search"
+                            placeholder="Buscar categoría..."
+                            initialOptions={categories.map(c => ({
+                              value: c.id,
+                              label: c.name,
+                            }))}
+                            creatable={true}
+                            onCreateOption={(label) => {
+                                updateItem(idx, "new_category_name", label);
+                                return {
+                                    value: NEW_CATEGORY_OPTION_ID,
+                                    label: `(Nueva) ${label}`,
+                                };
+                            }}
+                          />
                         </td>
                         <td className="p-2 text-center">
                           <input 
@@ -524,27 +576,48 @@ export default function GastosPage() {
                             onChange={(e) => updateItem(idx, "quantity", parseInt(e.target.value) || 1)}
                           />
                         </td>
-                        <td className="p-2 text-right">
-                          <input 
-                            type="number" min="0" step="0.01"
-                            placeholder="0.00"
-                            className="w-24 text-right bg-transparent border border-border rounded px-1 py-1 placeholder:text-muted-foreground/40"
-                            value={item.amount === 0 ? "" : item.amount} 
-                            onChange={(e) => {
-                                const val = e.target.value;
-                                updateItem(idx, "amount", val === "" ? 0 : parseFloat(val));
-                            }}
-                          />
+                        
+                        {/* ✅ INPUT PRECIO CON TOOLTIP */}
+                        <td className="p-2 text-right relative">
+                            <Tooltip 
+                                text="¡Precio requerido!" 
+                                show={priceErrors.has(idx)} 
+                                variant="error"
+                                className="mb-1"
+                            >
+                                <Input 
+                                    isCurrency
+                                    prefixText="$"
+                                    placeholder="0.00"
+                                    className={cn(
+                                        "w-24 h-auto py-1 px-1 text-right bg-transparent border border-border rounded hover:border-primary/50 focus:border-primary focus:ring-0 text-sm",
+                                        priceErrors.has(idx) && "border-red-500 focus:border-red-500 bg-red-50/10"
+                                    )}
+                                    value={item.amount === 0 ? "" : item.amount} 
+                                    onValueChange={(val) => updateItem(idx, "amount", val)}
+                                    
+                                    onFocus={() => {
+                                        if(priceErrors.has(idx)) {
+                                            setPriceErrors(prev => {
+                                                const next = new Set(prev);
+                                                next.delete(idx);
+                                                return next;
+                                            });
+                                        }
+                                    }}
+                                />
+                            </Tooltip>
                         </td>
-                        <td className="p-2 text-right font-mono text-muted-foreground py-2">
-                          ${(item.amount * item.quantity).toFixed(2)}
+
+                        <td className="p-2 text-right font-mono text-muted-foreground py-2 align-middle">
+                          ${(item.amount * item.quantity).toLocaleString("es-MX", {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                         </td>
-                        <td className="p-2 text-center">
+                        <td className="p-2 text-center align-middle">
                           {formData.items.length > 1 && (
                             <button 
                               type="button"
                               onClick={() => removeItemRow(idx)}
-                              className="text-red-400 hover:text-red-600 transition-colors py-1"
+                              className="text-red-400 hover:text-red-600 transition-colors p-1"
                             >
                               <TrashIcon className="h-4 w-4" />
                             </button>
@@ -576,7 +649,7 @@ export default function GastosPage() {
         </form>
       </Modal>
 
-      {/* --- MODAL CONFIRMACIÓN DE NUEVA CATEGORÍA --- */}
+      {/* --- MODAL CONFIRMACIÓN --- */}
       <Modal
         isOpen={isCategoryConfirmOpen}
         onClose={() => setIsCategoryConfirmOpen(false)}
@@ -584,14 +657,13 @@ export default function GastosPage() {
         className="max-w-md border-l-4 border-l-yellow-500"
       >
         <div className="space-y-4">
-           <div className="flex items-start gap-3 bg-yellow-50 dark:bg-yellow-900/20 p-3 rounded-lg text-yellow-800 dark:text-yellow-200 text-sm">
+            <div className="flex items-start gap-3 bg-yellow-50 dark:bg-yellow-900/20 p-3 rounded-lg text-yellow-800 dark:text-yellow-200 text-sm">
               <ExclamationTriangleIcon className="h-5 w-5 shrink-0" />
               <p>Estás a punto de crear nuevas categorías en el sistema global. Esta acción <strong>solo puede ser revertida por un administrador</strong>.</p>
-           </div>
+            </div>
 
-           <p className="text-sm font-medium">Se crearán las siguientes categorías:</p>
-           <ul className="list-disc list-inside text-sm text-muted-foreground bg-muted p-3 rounded-md">
-              {/* Listamos las categorías únicas que se van a crear */}
+            <p className="text-sm font-medium">Se crearán las siguientes categorías:</p>
+            <ul className="list-disc list-inside text-sm text-muted-foreground bg-muted p-3 rounded-md">
               {Array.from(new Set(
                   formData.items
                     .filter(i => i.category_id === NEW_CATEGORY_OPTION_ID && i.new_category_name?.trim())
@@ -599,22 +671,21 @@ export default function GastosPage() {
               )).map((name, i) => (
                   <li key={i}>{name}</li>
               ))}
-           </ul>
+            </ul>
 
-           <div className="flex justify-end gap-3 pt-2">
+            <div className="flex justify-end gap-3 pt-2">
               <Button variant="outline" onClick={() => setIsCategoryConfirmOpen(false)}>Revisar</Button>
               <Button 
                 className="bg-yellow-600 hover:bg-yellow-700 text-white" 
-                onClick={processFinalSubmit} // Llamada directa al proceso final
+                onClick={processFinalSubmit} 
                 disabled={isSubmitting}
               >
                 {isSubmitting ? "Creando..." : "Confirmar y Guardar"}
               </Button>
-           </div>
+            </div>
         </div>
       </Modal>
 
-      {/* --- MODAL ELIMINAR --- */}
       <Modal
         isOpen={isDeleteOpen}
         onClose={() => setIsDeleteOpen(false)}

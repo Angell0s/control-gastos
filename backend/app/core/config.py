@@ -1,3 +1,4 @@
+#backend\app\core\config.py
 import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -15,6 +16,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES_LONG: int = 10080
     
     # Admin Inicial (Para el script)
     ADMIN_EMAIL: str

@@ -1,13 +1,13 @@
 #backend\app\api\routers\auth.py
 from datetime import timedelta
 from typing import Any
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Form # <-- Importamos Form
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.ext.asyncio import AsyncSession  # <-- CAMBIO: Usar AsyncSession
-from sqlalchemy import select                  # <-- CAMBIO: Importar select para consultas
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 # Imports de tus archivos
-from app.api.deps import get_db                # <-- CAMBIO: Importar desde deps, no session
+from app.api.deps import get_db
 from app.core import security
 from app.core.config import settings
 from app.models.user import User
@@ -16,42 +16,46 @@ from app.schemas.token import Token
 router = APIRouter()
 
 @router.post("/login/access-token", response_model=Token)
-async def login_access_token(                  # <-- CAMBIO: async def
-    db: AsyncSession = Depends(get_db),        # <-- CAMBIO: Tipo AsyncSession
-    form_data: OAuth2PasswordRequestForm = Depends()
+async def login_access_token(
+    db: AsyncSession = Depends(get_db),
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    remember_me: bool = Form(False)  # <-- Nuevo parámetro opcional (default False)
 ) -> Any:
     """
-    Valida credenciales y devuelve un JWT (Versión Async).
+    Valida credenciales y devuelve un JWT.
+    Si 'remember_me' es True, el token dura mucho más tiempo (configurado en settings).
     """
-    # 1. Buscamos al usuario por EMAIL de forma asíncrona
-    # db.query() NO EXISTE en modo async. Usamos: await db.execute(select(...))
     
+    # 1. Buscamos al usuario por EMAIL
     query = select(User).where(User.email == form_data.username)
     result = await db.execute(query)
     user = result.scalars().first()
     
-    # 2. Validaciones: ¿Existe el usuario? ¿Coincide la contraseña?
-    # (security.verify_password no necesita await porque es CPU-bound, no I/O bound)
+    # 2. Validaciones
     if not user or not security.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Email o contraseña incorrectos",
         )
     
-    # 3. (Opcional) Validar si el usuario está activo
     if not user.is_active:
          raise HTTPException(status_code=400, detail="Usuario inactivo")
 
-    # 4. Definir expiración del token
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    # 3. Definir expiración según "remember_me"
+    if remember_me:
+        # Sesión extendida (ej. 7 días)
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES_LONG)
+    else:
+        # Sesión estándar (ej. 30 min)
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     
-    # 5. Crear el token (Esto es pura lógica de Python, no requiere await)
+    # 4. Crear el token
     access_token = security.create_access_token(
-        subject=str(user.id),  # Aseguramos que sea string por si es UUID
+        subject=str(user.id),
         expires_delta=access_token_expires
     )
     
-    # 6. Devolver respuesta
+    # 5. Devolver respuesta
     return {
         "access_token": access_token,
         "token_type": "bearer",

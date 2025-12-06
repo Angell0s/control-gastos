@@ -62,15 +62,16 @@ async def read_all_categories_admin(
     return mapped_results
 
 
-# --- 2. ENDPOINT USUARIO: LISTAR CATEGORÍAS (CON CONTEO PROPIO) ---
+# --- 2. ENDPOINT USUARIO: LISTAR CATEGORÍAS ---
 @router.get("/", response_model=List[CategoryResponse])
 async def read_categories(
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user), 
     skip: int = 0,
     limit: int = 100,
+    search: Optional[str] = Query(None, min_length=1) # ✅ Nuevo parámetro opcional
 ):
-    # 1. Subquery Gastos del Usuario
+    # 1. Subquery Gastos (Igual que antes)
     sq_expenses = (
         select(
             ExpenseItem.category_id,
@@ -82,7 +83,7 @@ async def read_categories(
         .subquery()
     )
 
-    # 2. Subquery Ingresos del Usuario
+    # 2. Subquery Ingresos (Igual que antes)
     sq_incomes = (
         select(
             IngresoItem.category_id,
@@ -94,7 +95,7 @@ async def read_categories(
         .subquery()
     )
 
-    # 3. Consulta Principal con Doble Join
+    # 3. Consulta Principal
     stmt = (
         select(
             Category, 
@@ -103,7 +104,15 @@ async def read_categories(
         )
         .outerjoin(sq_expenses, Category.id == sq_expenses.c.category_id)
         .outerjoin(sq_incomes, Category.id == sq_incomes.c.category_id)
-        .order_by(Category.name)
+    )
+
+    # ✅ APLICAR FILTRO DE BÚSQUEDA SI EXISTE
+    if search:
+        # ilike hace búsqueda insensible a mayúsculas/minúsculas (ej: "com" encuentra "Comida")
+        stmt = stmt.where(Category.name.ilike(f"%{search}%"))
+
+    stmt = (
+        stmt.order_by(Category.name)
         .offset(skip)
         .limit(limit)
     )

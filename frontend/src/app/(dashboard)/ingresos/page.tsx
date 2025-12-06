@@ -9,6 +9,7 @@ import { DataTable, ColumnDef } from "@/components/DataTable";
 import { Modal } from "@/components/Modal";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent } from "@/components/ui/Card";
+import { AsyncSearchSelect, AsyncOption } from "@/components/ui/AsyncSearchSelect"; // ✅ Importado
 import { 
   BanknotesIcon, 
   PlusIcon, 
@@ -17,7 +18,7 @@ import {
   BriefcaseIcon, 
   XMarkIcon,
   TagIcon,
-  ExclamationTriangleIcon // ✅ Importado para la advertencia
+  ExclamationTriangleIcon 
 } from "@heroicons/react/24/outline";
 import { toast } from "sonner";
 
@@ -67,7 +68,7 @@ const initialForm: IngresoFormData = {
   items: [{ ...initialItem }]
 };
 
-// ID ficticio para identificar la acción de crear nueva
+// ID ficticio usado por el componente AsyncSearchSelect
 const NEW_CATEGORY_OPTION_ID = "NEW_CATEGORY_OPTION";
 
 export default function IngresosPage() {
@@ -84,7 +85,7 @@ export default function IngresosPage() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   
-  // ✅ Estado para modal de confirmación de creación de categoría
+  // ✅ Estado para modal de confirmación
   const [isCategoryConfirmOpen, setIsCategoryConfirmOpen] = useState(false);
   
   const [currentIngreso, setCurrentIngreso] = useState<Ingreso | null>(null);
@@ -177,7 +178,7 @@ export default function IngresosPage() {
   const updateItem = (index: number, field: keyof IngresoItem, value: any) => {
     const newItems = [...formData.items];
 
-    // Lógica especial para resetear new_category_name si cambian a una categoría existente
+    // Si cambiamos la categoría (y no es la opción de "crear nueva"), limpiamos el nombre temporal
     if (field === "category_id" && value !== NEW_CATEGORY_OPTION_ID) {
         newItems[index].new_category_name = "";
     }
@@ -191,28 +192,24 @@ export default function IngresosPage() {
     return formData.items.reduce((acc, item) => acc + (item.monto || 0), 0);
   };
 
-  // --- SUBMIT E INTERCEPCIÓN (Igual que Gastos) ---
+  // --- SUBMIT E INTERCEPCIÓN ---
 
   // 1. Interceptor del Submit
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validaciones básicas
     if (!formData.descripcion) {
         toast.warning("La descripción general es obligatoria.");
         return;
     }
     
-    // Verificar si hay categorías nuevas pendientes
     const hasNewCategories = formData.items.some(
         item => item.category_id === NEW_CATEGORY_OPTION_ID && item.new_category_name?.trim()
     );
 
     if (hasNewCategories) {
-        // Si hay nuevas, detenemos el proceso y pedimos confirmación
         setIsCategoryConfirmOpen(true);
     } else {
-        // Si no hay nuevas, procedemos directo
         processFinalSubmit();
     }
   };
@@ -223,18 +220,16 @@ export default function IngresosPage() {
     setIsCategoryConfirmOpen(false);
 
     try {
-        // A. Crear categorías nuevas si existen
+        // A. Crear categorías
         const itemsToProcess = [...formData.items];
-        const newCategoriesMap = new Map<string, string>(); // nombre -> id_real
+        const newCategoriesMap = new Map<string, string>();
 
-        // Nombres únicos
         const uniqueNewNames = Array.from(new Set(
             itemsToProcess
                 .filter(i => i.category_id === NEW_CATEGORY_OPTION_ID && i.new_category_name)
                 .map(i => i.new_category_name!.trim())
         ));
 
-        // Creamos las categorías
         for (const catName of uniqueNewNames) {
             try {
                 const res = await api.post<Category>("/categories/", { name: catName });
@@ -248,15 +243,15 @@ export default function IngresosPage() {
             }
         }
 
-        // B. Reemplazar IDs temporales
+        // B. Reemplazar IDs
         const itemsProcessed = itemsToProcess.map(item => {
-            // Lógica de descripción vacía si es único item
             let updatedItem = { ...item };
+            
+            // Si hay solo 1 item y no tiene descripción, usa la general
             if (itemsToProcess.length === 1 && !updatedItem.descripcion.trim()) {
                 updatedItem.descripcion = formData.descripcion;
             }
 
-            // Lógica de categoría nueva
             if (updatedItem.category_id === NEW_CATEGORY_OPTION_ID && updatedItem.new_category_name) {
                 const realId = newCategoriesMap.get(updatedItem.new_category_name.trim());
                 if (realId) {
@@ -267,7 +262,6 @@ export default function IngresosPage() {
             return updatedItem;
         });
 
-        // Validaciones finales de items
         if (itemsProcessed.some(i => !i.descripcion.trim())) {
             toast.warning("Describe cada concepto.");
             setIsSubmitting(false);
@@ -284,7 +278,7 @@ export default function IngresosPage() {
             return;
         }
 
-        // C. Guardar Ingreso
+        // C. Guardar
         const payload = {
             ...formData,
             items: itemsProcessed,
@@ -500,7 +494,7 @@ export default function IngresosPage() {
                         </div>
                     )}
 
-                    {/* INPUT DE MONTO (Hint 0.00) */}
+                    {/* INPUT DE MONTO */}
                     <div className={`relative ${formData.items.length === 1 ? "flex-1" : "w-32"}`}>
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg">$</span>
                         <input 
@@ -527,36 +521,34 @@ export default function IngresosPage() {
                     )}
                 </div>
 
-                {/* SELECTOR DE CATEGORÍA CON CREACIÓN CONDICIONAL */}
-                <div className="w-full flex flex-col px-1">
-                    <div className="flex items-center gap-2">
-                        <TagIcon className="h-3 w-3 text-slate-400" />
-                        <select 
-                            className="flex-1 text-xs text-slate-600 dark:text-slate-300 bg-transparent outline-none cursor-pointer [&>option]:bg-white [&>option]:text-black dark:[&>option]:bg-slate-900 dark:[&>option]:text-white border-none focus:ring-0 py-0 pl-0"
-                            value={item.category_id}
-                            onChange={(e) => updateItem(idx, "category_id", e.target.value)}
-                        >
-                            <option value="">Sin categoría (Se asignará 'Otros')</option>
-                            <option disabled>──────────</option>
-                            <option value={NEW_CATEGORY_OPTION_ID} className="font-bold text-green-600">✨ + Nueva Categoría</option>
-                            <option disabled>──────────</option>
-                            {categories.map(cat => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
-                        </select>
-                    </div>
-
-                    {/* INPUT CONDICIONAL PARA NOMBRE NUEVA CATEGORÍA */}
-                    {item.category_id === NEW_CATEGORY_OPTION_ID && (
-                         <div className="mt-2 pl-5">
-                            <input 
-                              type="text"
-                              autoFocus
-                              placeholder="Nombre nueva categoría..."
-                              className="text-xs w-full p-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded text-yellow-800 dark:text-yellow-200 placeholder:text-yellow-800/50 outline-none animate-in slide-in-from-top-1 duration-200"
-                              value={item.new_category_name}
-                              onChange={(e) => updateItem(idx, "new_category_name", e.target.value)}
-                            />
-                         </div>
-                    )}
+                {/* SELECTOR DE CATEGORÍA (COMPONENTE NUEVO) */}
+                <div className="w-full flex items-center gap-2 px-1">
+                    <TagIcon className="h-3 w-3 text-slate-400" />
+                    
+                    {/* ✅ Reemplazado por AsyncSearchSelect */}
+                    <AsyncSearchSelect
+                        className="flex-1"
+                        value={item.category_id || null}
+                        onChange={(newVal) => updateItem(idx, "category_id", newVal)}
+                        
+                        fetchUrl="/categories/"
+                        queryParam="search"
+                        placeholder="Categoría (o crea una nueva...)"
+                        
+                        initialOptions={categories.map(c => ({
+                            value: c.id,
+                            label: c.name,
+                        }))}
+                        
+                        creatable={true}
+                        onCreateOption={(label) => {
+                            updateItem(idx, "new_category_name", label);
+                            return {
+                                value: NEW_CATEGORY_OPTION_ID,
+                                label: `(Nueva) ${label}`,
+                            };
+                        }}
+                    />
                 </div>
 
               </div>

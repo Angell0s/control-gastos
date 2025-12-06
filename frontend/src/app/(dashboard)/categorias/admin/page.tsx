@@ -8,6 +8,7 @@ import api from "@/lib/api";
 import { DataTable, ColumnDef } from "@/components/DataTable";
 import { Modal } from "@/components/Modal";
 import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input"; // ✅ Importamos el nuevo Input
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { 
   TagIcon, 
@@ -18,8 +19,6 @@ import {
   ExclamationTriangleIcon,
   ArrowPathIcon,
   LockClosedIcon,
-  BanknotesIcon,
-  ShoppingCartIcon,
   EyeIcon,
   EyeSlashIcon,
   ArrowTrendingDownIcon,
@@ -50,7 +49,6 @@ export default function AdminCategoriasPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // ✅ ESTADO PARA EL SWITCH DE ADMIN
   const [isAdminView, setIsAdminView] = useState(false);
 
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -173,7 +171,6 @@ export default function AdminCategoriasPage() {
             {cat.name}
           </div>
           
-          {/* DESGLOSE DE USO */}
           <div className="flex gap-2 mt-1 ml-8">
             {cat.expenses_count > 0 && (
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-50 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 border border-orange-100 dark:border-orange-800 flex items-center gap-1">
@@ -255,10 +252,8 @@ export default function AdminCategoriasPage() {
           </p>
         </div>
         
-        {/* CONTROLES SUPERIORES */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full sm:w-auto">
           
-          {/* ✅ SWITCH DE VISTA ADMIN (Solo visible para SuperUser) */}
           {user?.is_superuser && (
             <div 
               className="flex items-center gap-2 px-3 py-2 bg-secondary/20 rounded-lg border border-border cursor-pointer select-none hover:bg-secondary/30 transition-colors"
@@ -341,15 +336,18 @@ export default function AdminCategoriasPage() {
       >
         <form onSubmit={handleSubmit} className="space-y-4 pt-2">
           <div className="space-y-2">
-            <label className="text-sm font-medium">Nombre</label>
-            <input 
+            <label className="text-sm font-medium text-foreground">Nombre</label>
+            
+            {/* ✅ NUEVO INPUT CON ICONO Y DISEÑO MODERNO */}
+            <Input 
               type="text" 
               autoFocus
               placeholder="Ej: Alimentos"
-              className="w-full p-2.5 rounded-md border border-border bg-background focus:ring-2 focus:ring-primary/50 outline-none transition-all"
+              icon={<TagIcon className="h-4 w-4" />}
               value={formData.name}
               onChange={(e) => setFormData({ name: e.target.value })}
             />
+
           </div>
           <div className="flex justify-end gap-3 pt-4 border-t border-border mt-6">
             <Button type="button" variant="outline" onClick={() => setIsFormOpen(false)}>Cancelar</Button>
@@ -391,8 +389,10 @@ export default function AdminCategoriasPage() {
               <label className="text-xs text-muted-foreground block">
                 Destino para los <strong>{currentCategory?.total_items_count}</strong> registros afectados:
               </label>
+              
+              {/* Select estilizado para parecerse al Input moderno */}
               <select 
-                className="w-full p-2 text-sm rounded-md border border-border bg-background focus:ring-2 focus:ring-primary/50 outline-none"
+                className="flex h-10 w-full rounded-lg border-2 border-transparent bg-secondary px-4 py-2 text-sm text-foreground transition-all duration-300 outline-none focus:bg-background focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
                 value={targetCategoryId}
                 onChange={(e) => setTargetCategoryId(e.target.value)}
               >

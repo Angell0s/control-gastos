@@ -144,3 +144,15 @@ body {
 /* Opcional: Asegurar que el delay funcione */
 .delay-200 { transition-delay: 200ms !important; }
 .delay-0 { transition-delay: 0ms !important; }
+
+@layer base {
+  input, textarea, select {
+    font-size: 16px; /* Móvil */
+  }
+
+  @media (min-width: 640px) {
+    input, textarea, select {
+      font-size: 0.875rem; /* sm:text-sm (14px) en Desktop */
+    }
+  }
+}
