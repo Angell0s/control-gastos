@@ -1,158 +1,104 @@
 @import "tailwindcss";
 
-/* === 1. CONFIGURACIÓN DEL TEMA === */
+/* === 1. AQUÍ ESTÁ LA MAGIA: Registramos el plugin en v4 === */
+@plugin "tailwindcss-animate";
+
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  /* Aquí conectamos Tailwind a nuestras variables CSS */
-  
-  /* Colores Base */
+  /* Tus variables de tema (sin cambios) */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-
-  /* Elementos de UI */
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
-  
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
-
-  /* Acciones Principales (Botones, Links activos) */
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
-
-  /* Acciones Secundarias */
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
-
-  /* Elementos apagados (Subtítulos, deshabilitados) */
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
-
-  /* Acentos (Hover en listas, elementos seleccionados) */
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
-
-  /* Destructivo (Borrar, Errores) */
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
-
-  /* Bordes e Inputs */
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
 }
 
-/* === 2. PALETA DE COLORES (AQUÍ EDITAS TUS COLORES) === */
+/* === 2. CORRECCIÓN CRÍTICA === 
+   Eliminamos la regla global de transición que tenías antes.
+   Solo dejamos el color de borde base.
+*/
+@layer base {
+  *, *::before, *::after {
+    border-color: var(--border);
+  }
 
-/* --- TEMA CLARO (LIGHT) --- */
-:root {
-  --background: #ffffff;
-  --foreground: #09090b; /* Casi negro */
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+  }
 
-  --card: #ffffff;
-  --card-foreground: #09090b;
- 
-  --popover: #ffffff;
-  --popover-foreground: #09090b;
- 
-  /* TU COLOR PRINCIPAL (Ahora es Azul Intenso) */
-  --primary: #2563eb; 
-  --primary-foreground: #ffffff;
- 
-  --secondary: #f4f4f5;
-  --secondary-foreground: #18181b;
- 
-  --muted: #f4f4f5;
-  --muted-foreground: #71717a;
- 
-  --accent: #f4f4f5;
-  --accent-foreground: #18181b;
- 
-  --destructive: #ef4444;
-  --destructive-foreground: #fafafa;
- 
-  --border: #e4e4e7;
-  --input: #e4e4e7;
-  --ring: #2563eb; /* Anillo de foco igual al primario */
+  /* Ajuste de fuentes */
+  input, textarea, select {
+    font-size: 16px;
+  }
+  @media (min-width: 640px) {
+    input, textarea, select {
+      font-size: 0.875rem;
+    }
+  }
 }
 
-/* --- TEMA OSCURO (DARK) --- */
+/* Variables de color (déjalas tal cual las tenías) */
+:root {
+  --background: #ffffff;
+  --foreground: #09090b;
+  --card: #ffffff;
+  --card-foreground: #09090b;
+  --popover: #ffffff;
+  --popover-foreground: #09090b;
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #18181b;
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+  --accent: #f4f4f5;
+  --accent-foreground: #18181b;
+  --destructive: #ef4444;
+  --destructive-foreground: #fafafa;
+  --border: #e4e4e7;
+  --input: #e4e4e7;
+  --ring: #2563eb;
+}
+
 .dark {
-  --background: #040111; /* Azul muy oscuro (más elegante que negro puro) */
+  --background: #040111;
   --foreground: #fafafa;
- 
-  --card: #0f172a; /* Azul noche para tarjetas */
+  --card: #0f172a;
   --card-foreground: #fafafa;
- 
   --popover: #0f172a;
   --popover-foreground: #fafafa;
- 
-  /* TU COLOR PRINCIPAL EN DARK (Un azul más luminoso) */
   --primary: #3b82f6;
   --primary-foreground: #ffffff;
- 
   --secondary: #1e293b;
   --secondary-foreground: #fafafa;
- 
   --muted: #1e293b;
   --muted-foreground: #94a3b8;
- 
   --accent: #1e293b;
   --accent-foreground: #fafafa;
- 
   --destructive: #7f1d1d;
   --destructive-foreground: #fafafa;
- 
   --border: #1e293b;
   --input: #1e293b;
   --ring: #1d4ed8;
 }
 
-/* === 3. ESTILOS GLOBALES Y TRANSICIONES === */
-body {
-  background-color: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
-}
-
-/* Transición suave universal */
-*, *::before, *::after {
-  border-color: var(--border); /* Por defecto todos los bordes usan esta variable */
-  transition-property: background-color, border-color, color, fill, stroke;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-  transition-duration: 300ms;
-}
-
-/* ... todo tu CSS anterior ... */
-
-/* === 4. ANIMACIONES MAESTRAS === */
-
-/* Clase para suavizar el Sidebar y el Main Layout */
-.smooth-transition {
-  transition-property: all !important; /* Forzamos que anime TODO (width, margin, padding) */
-  transition-duration: 500ms !important;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1) !important;
-}
-
-/* Clase para los textos que aparecen/desaparecen */
-.fade-text {
-  transition-property: opacity, width, transform !important;
-  transition-duration: 300ms !important;
-}
-
-/* Opcional: Asegurar que el delay funcione */
-.delay-200 { transition-delay: 200ms !important; }
-.delay-0 { transition-delay: 0ms !important; }
-
-@layer base {
-  input, textarea, select {
-    font-size: 16px; /* Móvil */
-  }
-
-  @media (min-width: 640px) {
-    input, textarea, select {
-      font-size: 0.875rem; /* sm:text-sm (14px) en Desktop */
-    }
-  }
-}
+/* Scrollbar personalizado */
+.custom-scrollbar::-webkit-scrollbar { width: 4px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
