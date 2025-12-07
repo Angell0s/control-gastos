@@ -33,7 +33,8 @@ interface Category {
 
 interface ExpenseItem {
   id?: string;
-  category_id: string;
+  // ✅ CORRECCIÓN: Permitir null explícitamente
+  category_id: string | null;
   name: string;
   amount: number;
   quantity: number;
@@ -55,7 +56,7 @@ interface ExpenseFormData {
 }
 
 const initialItem: ExpenseItem = {
-  category_id: "",
+  category_id: "", // Se mantiene string vacío para el input, se limpia al enviar
   name: "",
   amount: 0,
   quantity: 1,
@@ -87,9 +88,9 @@ export default function GastosPage() {
   const [isCategoryConfirmOpen, setIsCategoryConfirmOpen] = useState(false);
   const [pendingSubmitEvent, setPendingSubmitEvent] = useState<React.FormEvent | null>(null);
 
-  // ✅ ESTADOS PARA ERRORES (Set de índices de fila)
+  // Estados para errores
   const [priceErrors, setPriceErrors] = useState<Set<number>>(new Set());
-  const [nameErrors, setNameErrors]   = useState<Set<number>>(new Set()); // Nuevo para nombres
+  const [nameErrors, setNameErrors]   = useState<Set<number>>(new Set());
 
   const [currentExpense, setCurrentExpense] = useState<Expense | null>(null);
   const [formData, setFormData] = useState<ExpenseFormData>(initialForm);
@@ -128,12 +129,12 @@ export default function GastosPage() {
   const handleOpenCreate = () => {
     setCurrentExpense(null);
     setPriceErrors(new Set());
-    setNameErrors(new Set()); // Limpiar errores
-    const defaultCatId = ""; 
+    setNameErrors(new Set());
+    // Inicializamos con string vacío
     setFormData({
       date: new Date().toISOString().split('T')[0],
       notes: "",
-      items: [{ ...initialItem, category_id: defaultCatId }]
+      items: [{ ...initialItem, category_id: "" }]
     });
     setIsFormOpen(true);
   };
@@ -141,7 +142,7 @@ export default function GastosPage() {
   const handleOpenEdit = (expense: Expense) => {
     setCurrentExpense(expense);
     setPriceErrors(new Set());
-    setNameErrors(new Set()); // Limpiar errores
+    setNameErrors(new Set());
     setFormData({
       date: expense.date.split('T')[0],
       notes: expense.notes || "",
@@ -177,7 +178,6 @@ export default function GastosPage() {
       items: prev.items.filter((_, i) => i !== index)
     }));
     
-    // Limpiar errores al borrar la fila
     setPriceErrors(prev => {
         const next = new Set(prev);
         next.delete(index);
@@ -197,7 +197,6 @@ export default function GastosPage() {
         newItems[index].new_category_name = "";
     }
 
-    // Limpiar error de PRECIO si se corrige
     if (field === "amount" && value > 0) {
          setPriceErrors(prev => {
             if (!prev.has(index)) return prev;
@@ -207,7 +206,6 @@ export default function GastosPage() {
          });
     }
 
-    // Limpiar error de NOMBRE si se corrige
     if (field === "name" && value.toString().trim() !== "") {
          setNameErrors(prev => {
             if (!prev.has(index)) return prev;
@@ -232,7 +230,6 @@ export default function GastosPage() {
     
     let hasErrors = false;
 
-    // 1. Validación de NOMBRES
     const newNameErrors = new Set<number>();
     formData.items.forEach((item, idx) => {
         if (!item.name.trim()) {
@@ -242,7 +239,6 @@ export default function GastosPage() {
     });
     setNameErrors(newNameErrors);
 
-    // 2. Validación de PRECIOS
     const newPriceErrors = new Set<number>();
     formData.items.forEach((item, idx) => {
         if (item.amount <= 0) {
@@ -254,10 +250,9 @@ export default function GastosPage() {
 
     if (hasErrors) {
         toast.error("Por favor, completa los campos requeridos.");
-        return; // 🛑 DETENER SUBMIT
+        return; 
     }
 
-    // 3. Verificar Categorías Nuevas
     const hasNewCategories = formData.items.some(
         item => item.category_id === NEW_CATEGORY_OPTION_ID && item.new_category_name?.trim()
     );
@@ -298,23 +293,31 @@ export default function GastosPage() {
         }
 
         const finalItems = itemsToProcess.map(item => {
-            if (item.category_id === NEW_CATEGORY_OPTION_ID && item.new_category_name) {
-                const realId = newCategoriesMap.get(item.new_category_name.trim());
+            let updatedItem = { ...item };
+
+            // 1. Manejo de Nueva Categoría
+            if (updatedItem.category_id === NEW_CATEGORY_OPTION_ID && updatedItem.new_category_name) {
+                const realId = newCategoriesMap.get(updatedItem.new_category_name.trim());
                 if (realId) {
-                    return {
-                        ...item,
-                        category_id: realId,
-                        new_category_name: undefined
-                    };
+                    updatedItem.category_id = realId;
+                    updatedItem.new_category_name = undefined;
                 }
             }
-            return item;
+
+            // 2. ✅ CORRECCIÓN CRÍTICA: Convertir cadena vacía a NULL
+            if (updatedItem.category_id === "") {
+                updatedItem.category_id = null;
+            }
+
+            return updatedItem;
         });
 
         const payload = {
             ...formData,
             items: finalItems,
-            date: new Date(formData.date).toISOString()
+            date: new Date(formData.date).toISOString(),
+            // Opcional: limpiar notes si está vacío también
+            notes: formData.notes.trim() === "" ? null : formData.notes
         };
 
         if (currentExpense) {
@@ -515,7 +518,7 @@ export default function GastosPage() {
                     {formData.items.map((item, idx) => (
                       <tr key={idx} className="bg-background hover:bg-accent/5 align-top">
                         
-                        {/* ✅ INPUT PRODUCTO CON TOOLTIP */}
+                        {/* INPUT PRODUCTO CON TOOLTIP */}
                         <td className="p-2 pl-4 relative">
                           <Tooltip 
                                 text="¡Nombre requerido!" 
@@ -528,12 +531,10 @@ export default function GastosPage() {
                                 placeholder="Nombre..."
                                 className={cn(
                                     "w-full bg-transparent outline-none border-b border-transparent focus:border-primary placeholder:text-muted-foreground/50 py-2 transition-colors",
-                                    // Si hay error, borde rojo
                                     nameErrors.has(idx) && "border-b-red-500 bg-red-50/10"
                                 )}
                                 value={item.name}
                                 onChange={(e) => updateItem(idx, "name", e.target.value)}
-                                // Limpiar error al foco
                                 onFocus={() => {
                                     if(nameErrors.has(idx)) {
                                         setNameErrors(prev => {
@@ -577,7 +578,7 @@ export default function GastosPage() {
                           />
                         </td>
                         
-                        {/* ✅ INPUT PRECIO CON TOOLTIP */}
+                        {/* INPUT PRECIO CON TOOLTIP */}
                         <td className="p-2 text-right relative">
                             <Tooltip 
                                 text="¡Precio requerido!" 

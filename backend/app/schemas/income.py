@@ -9,7 +9,7 @@ from datetime import datetime
 class IngresoItemBase(BaseModel):
     descripcion: str
     monto: float = Field(..., gt=0)
-    category_id: UUID
+    category_id: Optional[UUID] = None 
 
 class IngresoItemCreate(IngresoItemBase):
     pass
@@ -22,18 +22,18 @@ class IngresoItemResponse(IngresoItemBase):
 # --- SCHEMAS DE INGRESO (PADRE) ---
 
 class IngresoBase(BaseModel):
-    descripcion: str
+    descripcion: str = Field(None, max_length=100)
     fecha: datetime
-    fuente: str
+    fuente: Optional[str] = Field(None, max_length=100)
 
 class IngresoCreate(IngresoBase):
     # Recibimos una lista de items al crear
     items: List[IngresoItemCreate]
 
 class IngresoUpdate(BaseModel):
-    descripcion: Optional[str] = None
+    descripcion: Optional[str] = Field(None, max_length=100)
     fecha: Optional[datetime] = None
-    fuente: Optional[str] = None
+    fuente: Optional[str] = Field(None, max_length=100)
     # Actualizar items es complejo, usualmente se maneja en endpoints separados 
     # o reemplazando la lista completa.
     

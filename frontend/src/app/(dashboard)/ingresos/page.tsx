@@ -9,7 +9,7 @@ import { DataTable, ColumnDef } from "@/components/DataTable";
 import { Modal } from "@/components/Modal";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent } from "@/components/ui/Card";
-import { AsyncSearchSelect, AsyncOption } from "@/components/ui/AsyncSearchSelect"; // ✅ Importado
+import { AsyncSearchSelect, AsyncOption } from "@/components/ui/AsyncSearchSelect";
 import { 
   BanknotesIcon, 
   PlusIcon, 
@@ -31,10 +31,10 @@ interface Category {
 
 interface IngresoItem {
   id?: string;
-  category_id: string;
+  // ✅ CORRECCIÓN: Permitimos null explícitamente en el tipo
+  category_id: string | null;
   descripcion: string;
   monto: number;
-  // ✅ Campo temporal para crear categoría
   new_category_name?: string; 
 }
 
@@ -55,7 +55,7 @@ interface IngresoFormData {
 }
 
 const initialItem: IngresoItem = {
-  category_id: "", 
+  category_id: "", // Se mantiene string vacío para el input, se limpia al enviar
   descripcion: "",
   monto: 0,
   new_category_name: ""
@@ -84,8 +84,6 @@ export default function IngresosPage() {
   // Estados UI
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
-  
-  // ✅ Estado para modal de confirmación
   const [isCategoryConfirmOpen, setIsCategoryConfirmOpen] = useState(false);
   
   const [currentIngreso, setCurrentIngreso] = useState<Ingreso | null>(null);
@@ -194,7 +192,6 @@ export default function IngresosPage() {
 
   // --- SUBMIT E INTERCEPCIÓN ---
 
-  // 1. Interceptor del Submit
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -243,7 +240,7 @@ export default function IngresosPage() {
             }
         }
 
-        // B. Reemplazar IDs
+        // B. Reemplazar IDs y LIMPIAR DATOS
         const itemsProcessed = itemsToProcess.map(item => {
             let updatedItem = { ...item };
             
@@ -259,6 +256,13 @@ export default function IngresosPage() {
                     updatedItem.new_category_name = undefined;
                 }
             }
+
+            // ✅ CORRECCIÓN CRÍTICA: Convertir cadena vacía a NULL
+            // Pydantic lanzará 422 si recibe "" en un campo UUID, debe ser null.
+            if (updatedItem.category_id === "") {
+                updatedItem.category_id = null;
+            }
+
             return updatedItem;
         });
 
@@ -272,17 +276,14 @@ export default function IngresosPage() {
             setIsSubmitting(false);
             return;
         }
-        if (itemsProcessed.some(i => i.category_id === NEW_CATEGORY_OPTION_ID)) {
-            toast.error("Error interno asignando categorías.");
-            setIsSubmitting(false);
-            return;
-        }
+        // Nota: ya no verificamos category_id === NEW... porque ya se debieron procesar arriba
 
         // C. Guardar
         const payload = {
             ...formData,
             items: itemsProcessed,
             fecha: new Date(formData.fecha).toISOString(),
+            // Enviamos null si la fuente está vacía
             fuente: formData.fuente.trim() === "" ? null : formData.fuente
         };
 
@@ -521,11 +522,10 @@ export default function IngresosPage() {
                     )}
                 </div>
 
-                {/* SELECTOR DE CATEGORÍA (COMPONENTE NUEVO) */}
+                {/* SELECTOR DE CATEGORÍA */}
                 <div className="w-full flex items-center gap-2 px-1">
                     <TagIcon className="h-3 w-3 text-slate-400" />
                     
-                    {/* ✅ Reemplazado por AsyncSearchSelect */}
                     <AsyncSearchSelect
                         className="flex-1"
                         value={item.category_id || null}

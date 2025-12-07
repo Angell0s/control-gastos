@@ -1,6 +1,6 @@
 #backend\app\models\incomes.py
 import uuid
-from typing import List, Optional # 1. Importar Optional
+from typing import List, Optional
 from datetime import datetime
 from sqlalchemy import String, Numeric, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
@@ -16,7 +16,6 @@ class Ingreso(Base):
     descripcion: Mapped[str] = mapped_column(String, nullable=False)
     fecha: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     
-    # 2. CAMBIO AQUÍ: Optional[str] y nullable=True
     fuente: Mapped[Optional[str]] = mapped_column(String, nullable=True) 
     
     monto_total: Mapped[float] = mapped_column(Numeric(12, 2), default=0.0)
@@ -46,4 +45,6 @@ class IngresoItem(Base):
     monto: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
 
     ingreso = relationship("Ingreso", back_populates="items")
-    category = relationship("Category")
+    
+    # ✅ AGREGADO: back_populates apunta al nombre definido en models/gastos.py
+    category = relationship("Category", back_populates="income_items")
