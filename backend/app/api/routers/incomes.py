@@ -1,19 +1,71 @@
-#backend\app\api\routers\incomes.py
-from typing import List, Any
+# backend\app\api\routers\incomes.py
+from typing import List, Any, Set
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from sqlalchemy.orm import selectinload
 
-from app.api import deps # Tus dependencias (get_db, get_current_user)
+from app.api import deps 
 from app.models.user import User
 from app.models.incomes import Ingreso, IngresoItem
+from app.models.gastos import Category  # <--- IMPORTANTE: Importamos el modelo de Categoría
 from app.schemas.income import IngresoCreate, IngresoUpdate, IngresoResponse
 from app.services.audit import log_activity
-from app.services.utils import get_or_create_category_by_name # ✅ Utilidad centralizada
+from app.services.utils import get_or_create_category_by_name
 
 router = APIRouter()
+
+# -----------------------------------------------------------------------------
+# HELPER: VALIDACIÓN DE CATEGORÍAS
+# -----------------------------------------------------------------------------
+async def validate_categories(db: AsyncSession, user_id: UUID, items: List[Any]):
+    """
+    Verifica que las categorías enviadas:
+    1. Existan.
+    2. Pertenezcan al usuario (o sean globales).
+    3. Estén activas (is_active=True).
+    Ignora los items con category_id=None (estos se asignarán a 'Otros' después).
+    """
+    # 1. Extraer IDs únicos que NO sean None
+    category_ids: Set[UUID] = {item.category_id for item in items if item.category_id}
+
+    if not category_ids:
+        return  # Si todo viene vacío (para asignar a Otros), no hay nada que validar
+
+    # 2. Consultar todas las categorías solicitadas en una sola query
+    query = select(Category).where(Category.id.in_(category_ids))
+    result = await db.execute(query)
+    found_categories = result.scalars().all()
+    
+    # Mapa para búsqueda rápida: {id: category_obj}
+    cat_map = {cat.id: cat for cat in found_categories}
+
+    # 3. Validar una por una
+    for cat_id in category_ids:
+        # A) ¿Existe?
+        if cat_id not in cat_map:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"La categoría con ID {cat_id} no existe."
+            )
+        
+        category = cat_map[cat_id]
+
+        # B) ¿Pertenece al usuario o es global?
+        # Si tiene user_id y es diferente al actual, error. (Si user_id es None, es global).
+        if category.user_id is not None and category.user_id != user_id:
+             raise HTTPException(
+                status_code=403, 
+                detail=f"No tienes permiso para usar la categoría '{category.name}'."
+            )
+
+        # C) ¿Está activa?
+        if not category.is_active:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"La categoría '{category.name}' está inactiva y no puede seleccionarse."
+            )
 
 
 # -----------------------------------------------------------------------------
@@ -29,8 +81,8 @@ async def read_ingresos(
     query = (
         select(Ingreso)
         .where(Ingreso.user_id == current_user.id)
-        .options(selectinload(Ingreso.items)) # Carga eficiente de hijos
-        .order_by(Ingreso.fecha.desc())       # Ordenar por fecha descendente
+        .options(selectinload(Ingreso.items)) 
+        .order_by(Ingreso.fecha.desc())
         .offset(skip)
         .limit(limit)
     )
@@ -39,7 +91,7 @@ async def read_ingresos(
 
 
 # -----------------------------------------------------------------------------
-# 2. CREATE (POST) - ATÓMICO CON CATEGORÍA DEFAULT
+# 2. CREATE (POST)
 # -----------------------------------------------------------------------------
 @router.post("/", response_model=IngresoResponse, status_code=status.HTTP_201_CREATED)
 async def create_ingreso(
@@ -47,7 +99,12 @@ async def create_ingreso(
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
-    # Hotfix para fechas offset-aware si es necesario con asyncpg
+    # --- VALIDACIÓN PREVIA ---
+    # Verifica existencia y estado activo antes de hacer nada
+    await validate_categories(db, current_user.id, ingreso_in.items)
+    # -------------------------
+
+    # Hotfix para fechas offset-aware 
     if ingreso_in.fecha.tzinfo is not None:
         ingreso_in.fecha = ingreso_in.fecha.replace(tzinfo=None)
 
@@ -73,7 +130,7 @@ async def create_ingreso(
             
             final_cat_id = item_in.category_id
             
-            # Si no viene categoría, usar la utilidad centralizada
+            # Si no viene categoría, usar la utilidad centralizada ("Otros")
             if not final_cat_id:
                 if not default_cat_id:
                     default_cat_id = await get_or_create_category_by_name(db, "Otros")
@@ -104,8 +161,7 @@ async def create_ingreso(
         return ingreso_refreshed
         
     except Exception as e:
-        await db.rollback() # Rollback crítico en caso de fallo
-        # Log de error (silencioso)
+        await db.rollback()
         try:
             await log_activity(db=db, user_id=current_user.id, action="CREATE_INGRESO_FAILED", source="WEB", details=str(e))
         except: pass
@@ -137,12 +193,12 @@ async def read_ingreso(
 
 
 # -----------------------------------------------------------------------------
-# 4. UPDATE (PUT) - REEMPLAZO COMPLETO
+# 4. UPDATE (PUT)
 # -----------------------------------------------------------------------------
 @router.put("/{id}", response_model=IngresoResponse)
 async def update_ingreso(
     id: UUID,
-    ingreso_in: IngresoUpdate, # O IngresoCreate si usas el mismo schema para input
+    ingreso_in: IngresoUpdate,
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
@@ -153,6 +209,11 @@ async def update_ingreso(
 
     if not ingreso:
         raise HTTPException(status_code=404, detail="Ingreso no encontrado")
+
+    # --- VALIDACIÓN PREVIA ---
+    # Validamos los nuevos items antes de intentar guardarlos
+    await validate_categories(db, current_user.id, ingreso_in.items)
+    # -------------------------
 
     # Hotfix fechas
     if ingreso_in.fecha and ingreso_in.fecha.tzinfo is not None:
@@ -168,7 +229,7 @@ async def update_ingreso(
         new_total = sum(item.monto for item in ingreso_in.items)
         ingreso.monto_total = new_total
 
-        # 3. Reemplazar Items (Estrategia limpia: Delete & Insert)
+        # 3. Reemplazar Items (Estrategia: Delete & Insert)
         await db.execute(delete(IngresoItem).where(IngresoItem.ingreso_id == id))
         
         default_cat_id = None
@@ -177,14 +238,14 @@ async def update_ingreso(
             
             final_cat_id = item_in.category_id
             
-            # Lógica de categoría default
+            # Lógica de categoría default ("Otros")
             if not final_cat_id:
                 if not default_cat_id:
                     default_cat_id = await get_or_create_category_by_name(db, "Otros")
                 final_cat_id = default_cat_id
 
             new_item = IngresoItem(
-                ingreso_id=ingreso.id, # ID del padre ya existente
+                ingreso_id=ingreso.id, 
                 category_id=final_cat_id,
                 descripcion=item_in.descripcion,
                 monto=item_in.monto

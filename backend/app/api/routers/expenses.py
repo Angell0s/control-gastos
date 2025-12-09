@@ -1,21 +1,64 @@
-#backend\app\api\routers\expenses.py
-from typing import List, Any
+# backend\app\api\routers\expenses.py
+from typing import List, Any, Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status, Response
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, or_
 from sqlalchemy.orm import selectinload
 
 from app.api import deps
-from app.models import Expense, ExpenseItem, User
+from app.models import Expense, ExpenseItem, User, Category
 from app.schemas import ExpenseCreate, ExpenseResponse
 from app.services.audit import log_activity 
+from app.services.utils import get_or_create_category_by_name 
 
 router = APIRouter()
 
-# -----------------------------------------------------------------------------
-# 1. CREATE (POST) - ATÓMICO
-# -----------------------------------------------------------------------------
+# ============================================================================
+# 🛡️ HELPER: VALIDACIÓN DE CATEGORÍAS
+# ============================================================================
+async def _validate_expense_categories(db: AsyncSession, items: list, user_id: UUID):
+    """
+    Valida que todas las categorías usadas existan, sean del usuario (o globales)
+    y estén activas. Permite category_id = None sin problemas (se asignarán a 'Otros' luego).
+    """
+    if not items:
+        return
+
+    # Solo validar las categorías que realmente tienen ID (ignorar None)
+    category_ids = {item.category_id for item in items if item.category_id is not None}
+    
+    if not category_ids:  # Todos son null o lista vacía → todo OK
+        return
+
+    stmt = select(Category).where(
+        Category.id.in_(category_ids),
+        or_(Category.user_id == user_id, Category.user_id.is_(None))
+    )
+    result = await db.execute(stmt)
+    found_categories = result.scalars().all()
+    found_map = {cat.id: cat for cat in found_categories}
+
+    for cat_id in category_ids:
+        cat = found_map.get(cat_id)
+        
+        # 1. ¿Existe y tengo permiso?
+        if not cat:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Categoría con ID {cat_id} no existe o no tienes acceso."
+            )
+        
+        # 2. ¿Está activa?
+        if not cat.is_active:
+            raise HTTPException(
+                status_code=400,
+                detail=f"La categoría '{cat.name}' está desactivada y no puede usarse en nuevos gastos."
+            )
+
+# ============================================================================
+# 1. CREATE (POST) - CON VALIDACIÓN Y ASIGNACIÓN "OTROS"
+# ============================================================================
 @router.post("/", response_model=ExpenseResponse, status_code=status.HTTP_201_CREATED)
 async def create_expense(
     *,
@@ -24,13 +67,17 @@ async def create_expense(
     current_user: User = Depends(deps.get_current_user)
 ) -> Any:
     """
-    Crea un nuevo Gasto con sus ítems en una sola transacción atómica.
+    Crea un nuevo Gasto. 
+    - Valida categorías activas antes de guardar.
+    - Asigna 'Otros' si no hay categoría.
     """
-    # 1. Calcular total en memoria (Regla de negocio: no confiar en el frontend para totales)
+    # 🔍 PASO PREVIO: Validar Categorías explícitas
+    await _validate_expense_categories(db, expense_in.items, current_user.id)
+
+    # 1. Calcular total en memoria
     calculated_total = sum(item.amount * item.quantity for item in expense_in.items)
 
-    # 2. Instanciar Cabecera (Padre)
-    # NO hacemos commit todavía, solo agregamos a la sesión
+    # 2. Instanciar Cabecera
     db_expense = Expense(
         user_id=current_user.id,
         notes=expense_in.notes,
@@ -40,25 +87,33 @@ async def create_expense(
     db.add(db_expense)
     
     try:
-        # 3. Instanciar Items (Hijos)
-        # Iteramos y agregamos a la sesión vinculando al padre
+        # Caché local para el ID de "Otros" en esta petición
+        default_cat_id = None
+
+        # 3. Instanciar Items
         for item_in in expense_in.items:
+            
+            final_cat_id = item_in.category_id
+
+            # ✅ Lógica de asignación automática a "Otros"
+            if not final_cat_id:
+                if not default_cat_id:
+                    default_cat_id = await get_or_create_category_by_name(db, "Otros")
+                final_cat_id = default_cat_id
+
             db_item = ExpenseItem(
-                expense=db_expense, # Vinculación directa ORM (más segura que usar ID)
-                category_id=item_in.category_id,
+                expense=db_expense,
+                category_id=final_cat_id,
                 name=item_in.name,
                 amount=item_in.amount,
                 quantity=item_in.quantity
             )
             db.add(db_item)
         
-        # 4. COMMIT ÚNICO (Atomicidad)
-        # Aquí se guardan padre e hijos al mismo tiempo. O todo o nada.
+        # 4. COMMIT ÚNICO
         await db.commit()
         
-        # 5. Refresh inteligente
-        # Necesitamos recargar el objeto para traer los IDs generados y los items
-        # Usamos una consulta explícita con eager loading para eficiencia
+        # 5. Refresh con items
         stmt = (
             select(Expense)
             .options(selectinload(Expense.items))
@@ -67,57 +122,49 @@ async def create_expense(
         result = await db.execute(stmt)
         db_expense = result.scalars().first()
 
-        # ✅ LOG EXITOSO
         await log_activity(
             db=db, user_id=current_user.id, action="CREATE_EXPENSE", source="WEB",
             details=f"Gasto creado por ${calculated_total:.2f} con {len(expense_in.items)} ítems."
         )
 
-    except Exception as e:
-        # ⛔ ROLLBACK CRÍTICO
-        # Si algo falla (ej. ID de categoría inválido), deshacemos todo (padre e hijos)
+    except HTTPException as he:
         await db.rollback()
-        
-        error_msg = str(e)
-        
-        # Log de fallo (silencioso para no interrumpir el raise)
-        try:
-            await log_activity(
-                db=db, user_id=current_user.id, action="CREATE_EXPENSE_FAILED", source="WEB",
-                details=f"Falló al crear gasto: {error_msg}"
-            )
-        except: pass 
-
-        raise HTTPException(status_code=400, detail=f"Error procesando el gasto: {error_msg}")
+        raise he
+    except Exception as e:
+        await db.rollback()
+        await log_activity(db, current_user.id, "CREATE_EXPENSE_FAILED", "WEB", f"Error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Error procesando el gasto: {str(e)}")
 
     return db_expense
 
-
-# -----------------------------------------------------------------------------
+# ============================================================================
 # 2. READ ALL (GET LIST)
-# -----------------------------------------------------------------------------
+# ============================================================================
 @router.get("/", response_model=List[ExpenseResponse])
 async def read_expenses(
     db: AsyncSession = Depends(deps.get_db),
     skip: int = 0,
-    limit: int = 100,
+    limit: Optional[int] = Query(100, description="Límite de registros. 0 para 'sin límite'."),
     current_user: User = Depends(deps.get_current_user)
 ) -> Any:
     stmt = (
         select(Expense)
-        .options(selectinload(Expense.items)) # Carga ansiosa eficiente
+        .options(selectinload(Expense.items))
         .where(Expense.user_id == current_user.id)
         .order_by(Expense.date.desc())
         .offset(skip)
-        .limit(limit)
     )
+
+    # Lógica para "Sin Límites"
+    if limit is not None and limit > 0:
+        stmt = stmt.limit(limit)
+    
     result = await db.execute(stmt)
     return result.scalars().all()
 
-
-# -----------------------------------------------------------------------------
+# ============================================================================
 # 3. READ ONE (GET BY ID)
-# -----------------------------------------------------------------------------
+# ============================================================================
 @router.get("/{expense_id}", response_model=ExpenseResponse)
 async def read_expense_by_id(
     expense_id: UUID,
@@ -135,27 +182,20 @@ async def read_expense_by_id(
     if not expense:
         raise HTTPException(status_code=404, detail="Gasto no encontrado")
     
-    # Seguridad de propiedad
     if expense.user_id != current_user.id:
-        await log_activity(
-            db=db, user_id=current_user.id, action="ACCESS_DENIED", source="WEB",
-            details=f"Intento de ver gasto ajeno {expense_id}"
-        )
         raise HTTPException(status_code=403, detail="No tienes permiso para ver este gasto")
         
     return expense
 
-
-# -----------------------------------------------------------------------------
-# 4. DELETE (DELETE)
-# -----------------------------------------------------------------------------
+# ============================================================================
+# 4. DELETE
+# ============================================================================
 @router.delete("/{expense_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_expense(
     expense_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    # Validar existencia y propiedad
     stmt = select(Expense).where(Expense.id == expense_id)
     result = await db.execute(stmt)
     expense = result.scalars().first()
@@ -164,41 +204,21 @@ async def delete_expense(
         raise HTTPException(status_code=404, detail="Gasto no encontrado")
 
     if expense.user_id != current_user.id:
-        await log_activity(
-            db=db, user_id=current_user.id, action="ACCESS_DENIED_DELETE", source="WEB",
-            details=f"Intento de borrar gasto ajeno {expense_id}"
-        )
         raise HTTPException(status_code=403, detail="No tienes permiso para borrar este gasto")
 
-    # Datos para el log antes de borrar
-    total_deleted = expense.total
-    
     try:
-        # Al borrar el padre, el 'cascade="all, delete-orphan"' del modelo 
-        # se encarga de borrar los items. No hace falta borrarlos manualmente.
         await db.delete(expense)
         await db.commit()
-
-        await log_activity(
-            db=db, user_id=current_user.id, action="DELETE_EXPENSE", source="WEB",
-            details=f"Gasto eliminado (${total_deleted:.2f})."
-        )
+        await log_activity(db, current_user.id, "DELETE_EXPENSE", "WEB", f"Gasto {expense_id} eliminado.")
     except Exception as e:
         await db.rollback()
-        try:
-            await log_activity(
-                db=db, user_id=current_user.id, action="DELETE_EXPENSE_FAILED", source="WEB",
-                details=f"Error borrando ID {expense_id}: {str(e)}"
-            )
-        except: pass
         raise HTTPException(status_code=400, detail=f"No se pudo eliminar: {str(e)}")
 
     return Response(status_code=204)
-    
 
-# -----------------------------------------------------------------------------
-# 5. UPDATE (PUT) - REEMPLAZO COMPLETO ATÓMICO
-# -----------------------------------------------------------------------------
+# ============================================================================
+# 5. UPDATE (PUT) - REEMPLAZO COMPLETO CON VALIDACIÓN Y "OTROS"
+# ============================================================================
 @router.put("/{expense_id}", response_model=ExpenseResponse)
 async def update_expense(
     expense_id: UUID,
@@ -215,13 +235,10 @@ async def update_expense(
         raise HTTPException(status_code=404, detail="Gasto no encontrado")
         
     if expense.user_id != current_user.id:
-        await log_activity(
-            db=db, user_id=current_user.id, action="ACCESS_DENIED_UPDATE", source="WEB",
-            details=f"Intento de editar gasto ajeno {expense_id}"
-        )
         raise HTTPException(status_code=403, detail="No tienes permiso para editar este gasto")
 
-    old_total = expense.total
+    # 🔍 PASO PREVIO: Validar Nuevas Categorías explícitas
+    await _validate_expense_categories(db, expense_in.items, current_user.id)
 
     try:
         # 2. Actualizar campos directos
@@ -234,25 +251,34 @@ async def update_expense(
         new_total = sum(item.amount * item.quantity for item in expense_in.items)
         expense.total = new_total
 
-        # 4. Gestión de Ítems (Estrategia: Wipe & Replace)
-        # Borramos los ítems viejos
+        # 4. Gestión de Ítems (Wipe & Replace)
         await db.execute(delete(ExpenseItem).where(ExpenseItem.expense_id == expense_id))
         
-        # Insertamos los nuevos
+        default_cat_id = None
+
         for item_in in expense_in.items:
+            
+            final_cat_id = item_in.category_id
+
+            # ✅ Lógica de asignación automática a "Otros"
+            if not final_cat_id:
+                if not default_cat_id:
+                    default_cat_id = await get_or_create_category_by_name(db, "Otros")
+                final_cat_id = default_cat_id
+
             db_item = ExpenseItem(
-                expense_id=expense.id, # Aquí usamos ID porque el objeto 'expense' ya existe en BD
-                category_id=item_in.category_id,
+                expense_id=expense.id,
+                category_id=final_cat_id,
                 name=item_in.name,
                 amount=item_in.amount,
                 quantity=item_in.quantity
             )
             db.add(db_item)
 
-        # 5. COMMIT ÚNICO
+        # 5. COMMIT
         await db.commit()
         
-        # 6. Refresh para respuesta
+        # 6. Refresh
         stmt_refresh = (
             select(Expense)
             .options(selectinload(Expense.items))
@@ -263,17 +289,14 @@ async def update_expense(
 
         await log_activity(
             db=db, user_id=current_user.id, action="UPDATE_EXPENSE", source="WEB",
-            details=f"Gasto actualizado. Nuevo total: ${new_total:.2f} (Anterior: ${old_total:.2f})."
+            details=f"Actualizado. Total: ${new_total:.2f}"
         )
 
+    except HTTPException as he:
+        await db.rollback()
+        raise he
     except Exception as e:
         await db.rollback()
-        try:
-            await log_activity(
-                db=db, user_id=current_user.id, action="UPDATE_EXPENSE_FAILED", source="WEB",
-                details=f"Error actualizando ID {expense_id}: {str(e)}"
-            )
-        except: pass
         raise HTTPException(status_code=400, detail=f"Error actualizando: {str(e)}")
 
     return expense

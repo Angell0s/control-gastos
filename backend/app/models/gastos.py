@@ -1,6 +1,6 @@
 #backend\app\models\gastos.py
 import uuid
-from sqlalchemy import Column, String, Integer, ForeignKey, DateTime, Float, func, Boolean, Index
+from sqlalchemy import Column, String, Integer, ForeignKey, DateTime, Float, func, Boolean, Index, text
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID
 from app.db.session import Base
@@ -9,35 +9,30 @@ class Category(Base):
     __tablename__ = "categories"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    
-    # name sin unique=True aquí, se maneja en __table_args__
-    name = Column(String, nullable=False) 
-    
+    name = Column(String, nullable=False)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    is_active = Column(Boolean, default=True, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
 
-    # Relaciones
     expense_items = relationship("ExpenseItem", back_populates="category")
-    
-    # ✅ AGREGADO: Relación inversa para Ingresos (Necesario para el ORM)
     income_items = relationship("IngresoItem", back_populates="category")
-    
+
     __table_args__ = (
-        # 1. Evita duplicados para el MISMO usuario
+        # Nombre único por usuario (privadas)
         Index(
-            'ix_categories_name_user_id',
-            'name', 'user_id',
+            'ix_categories_name_user_unique',
+            'name',
+            'user_id',
             unique=True,
-            postgresql_where=(user_id != None)
+            postgresql_where=text("user_id IS NOT NULL")
         ),
-        
-        # 2. Evita duplicados GLOBALES
+        # Nombre único para globales
         Index(
-            'ix_categories_name_global',
+            'ix_categories_name_global_unique',
             'name',
             unique=True,
-            postgresql_where=(user_id == None)
+            postgresql_where=text("user_id IS NULL")
         ),
+        Index('ix_categories_user_id', 'user_id'),
     )
 
 class Expense(Base):
@@ -56,13 +51,17 @@ class ExpenseItem(Base):
     __tablename__ = "expense_items"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    
-    expense_id = Column(UUID(as_uuid=True), ForeignKey("expenses.id"), nullable=False)
-    category_id = Column(UUID(as_uuid=True), ForeignKey("categories.id"), nullable=False)
-    
+    expense_id = Column(UUID(as_uuid=True), ForeignKey("expenses.id"), nullable=False, index=True)
+    category_id = Column(UUID(as_uuid=True), ForeignKey("categories.id"), nullable=True, index=True)
+
     name = Column(String, nullable=False)
     amount = Column(Float, nullable=False)
-    quantity = Column(Integer, default=1)
+    quantity = Column(Integer, default=1, nullable=False)
 
     expense = relationship("Expense", back_populates="items")
     category = relationship("Category", back_populates="expense_items")
+
+    __table_args__ = (
+        Index('ix_expense_items_expense_id', 'expense_id'),
+        Index('ix_expense_items_category_id', 'category_id'),
+    )
