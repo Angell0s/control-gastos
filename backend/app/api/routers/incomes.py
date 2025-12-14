@@ -1,5 +1,5 @@
 # backend\app\api\routers\incomes.py
-from typing import List, Any, Set
+from typing import List, Any
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,64 +9,15 @@ from sqlalchemy.orm import selectinload
 from app.api import deps 
 from app.models.user import User
 from app.models.incomes import Ingreso, IngresoItem
-from app.models.gastos import Category  # <--- IMPORTANTE: Importamos el modelo de Categoría
 from app.schemas.income import IngresoCreate, IngresoUpdate, IngresoResponse
 from app.services.audit import log_activity
-from app.services.utils import get_or_create_category_by_name
+
+# ✅ Importamos los helpers centralizados (DRY)
+from app.services.utils import get_or_create_category_by_name, validate_categories_availability
+
+from datetime import timezone
 
 router = APIRouter()
-
-# -----------------------------------------------------------------------------
-# HELPER: VALIDACIÓN DE CATEGORÍAS
-# -----------------------------------------------------------------------------
-async def validate_categories(db: AsyncSession, user_id: UUID, items: List[Any]):
-    """
-    Verifica que las categorías enviadas:
-    1. Existan.
-    2. Pertenezcan al usuario (o sean globales).
-    3. Estén activas (is_active=True).
-    Ignora los items con category_id=None (estos se asignarán a 'Otros' después).
-    """
-    # 1. Extraer IDs únicos que NO sean None
-    category_ids: Set[UUID] = {item.category_id for item in items if item.category_id}
-
-    if not category_ids:
-        return  # Si todo viene vacío (para asignar a Otros), no hay nada que validar
-
-    # 2. Consultar todas las categorías solicitadas en una sola query
-    query = select(Category).where(Category.id.in_(category_ids))
-    result = await db.execute(query)
-    found_categories = result.scalars().all()
-    
-    # Mapa para búsqueda rápida: {id: category_obj}
-    cat_map = {cat.id: cat for cat in found_categories}
-
-    # 3. Validar una por una
-    for cat_id in category_ids:
-        # A) ¿Existe?
-        if cat_id not in cat_map:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"La categoría con ID {cat_id} no existe."
-            )
-        
-        category = cat_map[cat_id]
-
-        # B) ¿Pertenece al usuario o es global?
-        # Si tiene user_id y es diferente al actual, error. (Si user_id es None, es global).
-        if category.user_id is not None and category.user_id != user_id:
-             raise HTTPException(
-                status_code=403, 
-                detail=f"No tienes permiso para usar la categoría '{category.name}'."
-            )
-
-        # C) ¿Está activa?
-        if not category.is_active:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"La categoría '{category.name}' está inactiva y no puede seleccionarse."
-            )
-
 
 # -----------------------------------------------------------------------------
 # 1. READ ALL (GET LIST)
@@ -99,73 +50,69 @@ async def create_ingreso(
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
-    # --- VALIDACIÓN PREVIA ---
-    # Verifica existencia y estado activo antes de hacer nada
-    await validate_categories(db, current_user.id, ingreso_in.items)
-    # -------------------------
+    # 1. Validaciones previas (lectura, no requiere transacción)
+    await validate_categories_availability(db, ingreso_in.items, current_user.id)
 
-    # Hotfix para fechas offset-aware 
+    # 2. Normalización de fecha a UTC
     if ingreso_in.fecha.tzinfo is not None:
-        ingreso_in.fecha = ingreso_in.fecha.replace(tzinfo=None)
+        ingreso_in.fecha = ingreso_in.fecha.astimezone(timezone.utc).replace(tzinfo=None)
 
-    # 1. Calcular total
     total_amount = sum(item.monto for item in ingreso_in.items)
 
-    # 2. Crear Padre (Ingreso)
-    new_ingreso = Ingreso(
-        user_id=current_user.id,
-        descripcion=ingreso_in.descripcion,
-        fecha=ingreso_in.fecha,
-        fuente=ingreso_in.fuente,
-        monto_total=total_amount
-    )
-    db.add(new_ingreso)
-    
     try:
-        # Caché local para el ID de "Otros" en esta petición
-        default_cat_id = None
+        # --- INICIO BLOQUE TRANSACCIONAL ---
+        new_ingreso = Ingreso(
+            user_id=current_user.id,
+            descripcion=ingreso_in.descripcion,
+            fecha=ingreso_in.fecha,
+            fuente=ingreso_in.fuente,
+            monto_total=total_amount
+        )
+        db.add(new_ingreso)
         
-        # 3. Crear Hijos (Items)
+        # Flush para obtener el ID del ingreso sin comitear
+        await db.flush() 
+
+        default_cat_id = None
         for item_in in ingreso_in.items:
-            
             final_cat_id = item_in.category_id
             
-            # Si no viene categoría, usar la utilidad centralizada ("Otros")
             if not final_cat_id:
                 if not default_cat_id:
                     default_cat_id = await get_or_create_category_by_name(db, "Otros")
                 final_cat_id = default_cat_id
 
             new_item = IngresoItem(
-                ingreso=new_ingreso, # Vinculación directa ORM
+                ingreso_id=new_ingreso.id, # Usamos el ID generado por el flush
                 category_id=final_cat_id,
                 descripcion=item_in.descripcion,
                 monto=item_in.monto
             )
             db.add(new_item)
 
-        # 4. Commit Atómico
+        # Log dentro de la lógica, pero protegido para no romper la transacción principal
+        # Opcional: Si el log es vital, déjalo sin try/except. 
+        # Si es secundario, usa esto:
+        try:
+            await log_activity(
+                db=db, user_id=current_user.id, action="CREATE_INGRESO", source="WEB",
+                details=f"Ingreso creado. Total: {total_amount}"
+            )
+        except Exception as log_error:
+            # Aquí podrías loguear a consola que falló el registro de auditoría
+            print(f"Fallo al auditar: {log_error}")
+
+        # 3. COMMIT FINAL (Todo o nada)
         await db.commit()
-        
-        # 5. Refresh para devolver datos completos
+        # --- FIN BLOQUE TRANSACCIONAL ---
+
+        # 4. Refresh para devolver datos completos
         query = select(Ingreso).where(Ingreso.id == new_ingreso.id).options(selectinload(Ingreso.items))
         result = await db.execute(query)
-        ingreso_refreshed = result.scalars().first()
+        return result.scalars().first()
 
-        # Auditoría
-        await log_activity(
-            db=db, user_id=current_user.id, action="CREATE_INGRESO", source="WEB",
-            details=f"Ingreso creado con {len(ingreso_in.items)} items. Total: {total_amount}"
-        )
-        
-        return ingreso_refreshed
-        
     except Exception as e:
-        await db.rollback()
-        try:
-            await log_activity(db=db, user_id=current_user.id, action="CREATE_INGRESO_FAILED", source="WEB", details=str(e))
-        except: pass
-            
+        await db.rollback() # Ahora sí limpia todo si algo falla antes del commit
         raise HTTPException(status_code=400, detail=f"Error creando ingreso: {str(e)}")
 
 
@@ -202,77 +149,109 @@ async def update_ingreso(
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
-    # 1. Buscar existente y validar propiedad
-    query = select(Ingreso).where(Ingreso.id == id, Ingreso.user_id == current_user.id)
+    # 1. Cargar Ingreso con sus Items existentes
+    # Usamos selectinload para tener los items listos en memoria
+    query = (
+        select(Ingreso)
+        .where(Ingreso.id == id, Ingreso.user_id == current_user.id)
+        .options(selectinload(Ingreso.items))
+    )
     result = await db.execute(query)
     ingreso = result.scalars().first()
 
     if not ingreso:
         raise HTTPException(status_code=404, detail="Ingreso no encontrado")
 
-    # --- VALIDACIÓN PREVIA ---
-    # Validamos los nuevos items antes de intentar guardarlos
-    await validate_categories(db, current_user.id, ingreso_in.items)
-    # -------------------------
+    # Validación previa de categorías (Optimización)
+    await validate_categories_availability(db, ingreso_in.items, current_user.id)
 
-    # Hotfix fechas
-    if ingreso_in.fecha and ingreso_in.fecha.tzinfo is not None:
-        ingreso_in.fecha = ingreso_in.fecha.replace(tzinfo=None)
-
+    # --- INICIO LÓGICA DE ACTUALIZACIÓN ---
     try:
-        # 2. Actualizar campos Padre
-        ingreso.descripcion = ingreso_in.descripcion
-        ingreso.fecha = ingreso_in.fecha
-        ingreso.fuente = ingreso_in.fuente
-        
-        # Recalcular total
-        new_total = sum(item.monto for item in ingreso_in.items)
-        ingreso.monto_total = new_total
+        # A. Actualizar campos del Padre (Ingreso)
+        if ingreso_in.descripcion is not None:
+            ingreso.descripcion = ingreso_in.descripcion
+        if ingreso_in.fuente is not None:
+            ingreso.fuente = ingreso_in.fuente
+        if ingreso_in.fecha is not None:
+             # Hotfix de fecha (idealmente usar .astimezone(timezone.utc))
+            if ingreso_in.fecha.tzinfo is not None:
+                ingreso_in.fecha = ingreso_in.fecha.replace(tzinfo=None)
+            ingreso.fecha = ingreso_in.fecha
 
-        # 3. Reemplazar Items (Estrategia: Delete & Insert)
-        await db.execute(delete(IngresoItem).where(IngresoItem.ingreso_id == id))
+        # B. Estrategia de Reconciliación de Items (Diffing)
         
-        default_cat_id = None
+        # Mapa de items actuales en BD: {uuid: objeto_db}
+        # Esto nos permite buscar rápido si un item ya existe.
+        existing_items_map = {item.id: item for item in ingreso.items}
+        
+        # Lista para rastrear qué IDs procesamos (para saber cuáles borrar después)
+        processed_item_ids = set()
+
+        default_cat_id = None # Cache para categoría 'Otros'
 
         for item_in in ingreso_in.items:
             
+            # Lógica de Categoría (Compartida para Crear y Actualizar)
             final_cat_id = item_in.category_id
-            
-            # Lógica de categoría default ("Otros")
             if not final_cat_id:
                 if not default_cat_id:
                     default_cat_id = await get_or_create_category_by_name(db, "Otros")
                 final_cat_id = default_cat_id
 
-            new_item = IngresoItem(
-                ingreso_id=ingreso.id, 
-                category_id=final_cat_id,
-                descripcion=item_in.descripcion,
-                monto=item_in.monto
-            )
-            db.add(new_item)
+            # CASO 1: ACTUALIZAR (Tiene ID y existe en el mapa)
+            if item_in.id and item_in.id in existing_items_map:
+                existing_item = existing_items_map[item_in.id]
+                
+                # Actualizamos campos
+                existing_item.descripcion = item_in.descripcion
+                existing_item.monto = item_in.monto
+                existing_item.category_id = final_cat_id
+                
+                processed_item_ids.add(item_in.id)
 
-        # 4. Commit
+            # CASO 2: CREAR (No tiene ID o el ID no está en la BD de este ingreso)
+            else:
+                new_item = IngresoItem(
+                    ingreso_id=ingreso.id, # Vinculamos al padre actual
+                    category_id=final_cat_id,
+                    descripcion=item_in.descripcion,
+                    monto=item_in.monto
+                )
+                db.add(new_item)
+
+        # CASO 3: BORRAR (Estaban en BD pero no vinieron en el request)
+        for existing_id, existing_item in existing_items_map.items():
+            if existing_id not in processed_item_ids:
+                await db.delete(existing_item)
+
+        # C. Recalcular Total (Basado en la entrada, que es la fuente de verdad)
+        ingreso.monto_total = sum(item.monto for item in ingreso_in.items)
+
+        # D. Commit Atómico
+        # Si algo falla arriba, nada se guarda.
         await db.commit()
-        
-        # 5. Refresh
+
+        # E. Refresh final
+        # Necesario para que el objeto 'ingreso' tenga los nuevos items con sus IDs generados
+        await db.refresh(ingreso) 
+        # A veces refresh no trae las relaciones anidadas nuevas, recargar es más seguro:
         query_refresh = select(Ingreso).where(Ingreso.id == id).options(selectinload(Ingreso.items))
         result_refresh = await db.execute(query_refresh)
         ingreso_refreshed = result_refresh.scalars().first()
 
-        await log_activity(
-            db=db, user_id=current_user.id, action="UPDATE_INGRESO", source="WEB",
-            details=f"Ingreso actualizado ID: {id}"
-        )
-        
+        # Auditoría (Fuera del flujo crítico de error, o manejada con cuidado)
+        try:
+            await log_activity(
+                db=db, user_id=current_user.id, action="UPDATE_INGRESO", source="WEB",
+                details=f"Ingreso actualizado ID: {id}. Items procesados: {len(ingreso_in.items)}"
+            )
+        except: pass
+
         return ingreso_refreshed
 
     except Exception as e:
         await db.rollback()
-        try:
-             await log_activity(db=db, user_id=current_user.id, action="UPDATE_INGRESO_FAILED", source="WEB", details=str(e))
-        except: pass
-        raise HTTPException(status_code=400, detail=f"Error actualizando: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Error actualizando ingreso: {str(e)}")
 
 
 # -----------------------------------------------------------------------------
@@ -292,7 +271,6 @@ async def delete_ingreso(
         raise HTTPException(status_code=404, detail="Ingreso no encontrado")
     
     try:
-        # cascade="all, delete-orphan" en el modelo se encarga de los items
         await db.delete(ingreso)
         await db.commit()
         

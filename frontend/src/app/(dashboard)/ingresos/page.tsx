@@ -1,4 +1,4 @@
-//frontend\src\app\(dashboard)\ingresos\page.tsx
+// frontend/src/app/(dashboard)/ingresos/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -9,7 +9,7 @@ import { DataTable, ColumnDef } from "@/components/DataTable";
 import { Modal } from "@/components/Modal";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent } from "@/components/ui/Card";
-import { AsyncSearchSelect, AsyncOption } from "@/components/ui/AsyncSearchSelect";
+import { AsyncSearchSelect } from "@/components/ui/AsyncSearchSelect";
 import { 
   BanknotesIcon, 
   PlusIcon, 
@@ -18,9 +18,14 @@ import {
   BriefcaseIcon, 
   XMarkIcon,
   TagIcon,
-  ExclamationTriangleIcon 
+  ExclamationTriangleIcon,
+  QuestionMarkCircleIcon 
 } from "@heroicons/react/24/outline";
 import { toast } from "sonner";
+import clsx from "clsx"; 
+
+// Importaciones del sistema de modales
+import { MODAL_REGISTRY, ModalKey } from "@/lib/modalRegistry";
 
 // --- TIPOS ---
 
@@ -31,7 +36,6 @@ interface Category {
 
 interface IngresoItem {
   id?: string;
-  // ✅ CORRECCIÓN: Permitimos null explícitamente en el tipo
   category_id: string | null;
   descripcion: string;
   monto: number;
@@ -55,7 +59,7 @@ interface IngresoFormData {
 }
 
 const initialItem: IngresoItem = {
-  category_id: "", // Se mantiene string vacío para el input, se limpia al enviar
+  category_id: "", 
   descripcion: "",
   monto: 0,
   new_category_name: ""
@@ -68,7 +72,6 @@ const initialForm: IngresoFormData = {
   items: [{ ...initialItem }]
 };
 
-// ID ficticio usado por el componente AsyncSearchSelect
 const NEW_CATEGORY_OPTION_ID = "NEW_CATEGORY_OPTION";
 
 export default function IngresosPage() {
@@ -76,7 +79,7 @@ export default function IngresosPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  // Estados
+  // Estados de datos
   const [ingresos, setIngresos] = useState<Ingreso[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,6 +89,9 @@ export default function IngresosPage() {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [isCategoryConfirmOpen, setIsCategoryConfirmOpen] = useState(false);
   
+  // Estado para modales de ayuda genéricos
+  const [activeHelpModal, setActiveHelpModal] = useState<ModalKey | null>(null);
+
   const [currentIngreso, setCurrentIngreso] = useState<Ingreso | null>(null);
   const [formData, setFormData] = useState<IngresoFormData>(initialForm);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -141,7 +147,7 @@ export default function IngresosPage() {
       descripcion: ingreso.descripcion,
       fuente: ingreso.fuente || "",
       items: ingreso.items.map(i => ({
-        id: i.id,
+        id: i.id, 
         category_id: i.category_id,
         descripcion: i.descripcion,
         monto: i.monto,
@@ -176,7 +182,6 @@ export default function IngresosPage() {
   const updateItem = (index: number, field: keyof IngresoItem, value: any) => {
     const newItems = [...formData.items];
 
-    // Si cambiamos la categoría (y no es la opción de "crear nueva"), limpiamos el nombre temporal
     if (field === "category_id" && value !== NEW_CATEGORY_OPTION_ID) {
         newItems[index].new_category_name = "";
     }
@@ -217,7 +222,7 @@ export default function IngresosPage() {
     setIsCategoryConfirmOpen(false);
 
     try {
-        // A. Crear categorías
+        // A. Crear categorías nuevas si existen
         const itemsToProcess = [...formData.items];
         const newCategoriesMap = new Map<string, string>();
 
@@ -240,11 +245,10 @@ export default function IngresosPage() {
             }
         }
 
-        // B. Reemplazar IDs y LIMPIAR DATOS
+        // B. Mapear y Limpiar Datos
         const itemsProcessed = itemsToProcess.map(item => {
             let updatedItem = { ...item };
             
-            // Si hay solo 1 item y no tiene descripción, usa la general
             if (itemsToProcess.length === 1 && !updatedItem.descripcion.trim()) {
                 updatedItem.descripcion = formData.descripcion;
             }
@@ -257,13 +261,16 @@ export default function IngresosPage() {
                 }
             }
 
-            // ✅ CORRECCIÓN CRÍTICA: Convertir cadena vacía a NULL
-            // Pydantic lanzará 422 si recibe "" en un campo UUID, debe ser null.
             if (updatedItem.category_id === "") {
                 updatedItem.category_id = null;
             }
 
-            return updatedItem;
+            return {
+                id: updatedItem.id, 
+                category_id: updatedItem.category_id,
+                descripcion: updatedItem.descripcion,
+                monto: updatedItem.monto
+            };
         });
 
         if (itemsProcessed.some(i => !i.descripcion.trim())) {
@@ -276,15 +283,13 @@ export default function IngresosPage() {
             setIsSubmitting(false);
             return;
         }
-        // Nota: ya no verificamos category_id === NEW... porque ya se debieron procesar arriba
 
-        // C. Guardar
+        // C. Enviar Payload
         const payload = {
-            ...formData,
-            items: itemsProcessed,
+            descripcion: formData.descripcion,
             fecha: new Date(formData.fecha).toISOString(),
-            // Enviamos null si la fuente está vacía
-            fuente: formData.fuente.trim() === "" ? null : formData.fuente
+            fuente: formData.fuente.trim() === "" ? null : formData.fuente,
+            items: itemsProcessed
         };
 
         if (currentIngreso) {
@@ -292,7 +297,7 @@ export default function IngresosPage() {
             toast.success("Ingreso actualizado");
         } else {
             await api.post("/incomes/", payload);
-            toast.success("Ingreso y categorías registrados");
+            toast.success("Ingreso registrado");
         }
 
         setIsFormOpen(false);
@@ -371,14 +376,72 @@ export default function IngresosPage() {
     }
   ];
 
+  // ✅ HELPER: Renderizado de Modal Genérico
+  // Este helper ahora construye correctamente el header visual
+  const GenericModal = () => {
+    if (!activeHelpModal) return null;
+    const def = MODAL_REGISTRY[activeHelpModal];
+    const Icon = def.icon;
+
+    // Colores dinámicos (Idéntico a ModalProvider)
+    const colorClasses: Record<string, string> = {
+      indigo: "bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400",
+      red:    "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400",
+      blue:   "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400",
+      yellow: "bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400",
+      green:  "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400",
+      emerald:"bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400",
+      slate:  "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400",
+    };
+    const headerTheme = colorClasses[def.colorClass] || colorClasses.slate;
+
+    // Construcción del título para el header
+    const headerContent = (
+      <div className="flex items-center gap-2">
+         <div className={clsx("p-1.5 rounded-md", headerTheme)}>
+            <Icon className="h-5 w-5" />
+         </div>
+         <span>{def.title}</span>
+      </div>
+    );
+
+    return (
+      <Modal 
+        isOpen={!!activeHelpModal} 
+        onClose={() => setActiveHelpModal(null)} 
+        title={headerContent} // Título en el prop
+        className={`max-w-md border-l-4 border-l-${def.colorClass}-500`}
+      >
+        <div className="space-y-4 pt-2">
+           {/* Cuerpo limpio */}
+           <div className="text-sm text-muted-foreground">
+              {def.content({})} 
+           </div>
+
+           <div className="flex justify-end pt-4 mt-2 border-t border-border/50">
+              <Button onClick={() => setActiveHelpModal(null)}>Entendido</Button>
+           </div>
+        </div>
+      </Modal>
+    );
+  };
+
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto animate-in fade-in duration-500">
       
-      {/* HEADER */}
+      {/* HEADER PRINCIPAL */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2 text-green-700">
             <BanknotesIcon className="h-6 w-6" /> Mis Ingresos
+            {/* ✅ Botón de ayuda principal */}
+            <button 
+                onClick={() => setActiveHelpModal("INFO_PAGE_INGRESOS")}
+                className="text-slate-400 hover:text-green-600 transition-colors p-1 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800"
+                title="¿Cómo funciona?"
+            >
+                <QuestionMarkCircleIcon className="h-5 w-5" />
+            </button>
           </h1>
           <p className="text-muted-foreground text-sm">Administra tus entradas de dinero.</p>
         </div>
@@ -423,7 +486,22 @@ export default function IngresosPage() {
       <Modal
         isOpen={isFormOpen}
         onClose={() => setIsFormOpen(false)}
-        title={currentIngreso ? "Editar Ingreso" : "Nuevo Ingreso"}
+        title={
+          <div className="flex items-center gap-2">
+            <span>{currentIngreso ? "Editar Ingreso" : "Nuevo Ingreso"}</span>
+            <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setActiveHelpModal("INFO_FORM_INGRESOS");
+                }}
+                className="text-slate-400 hover:text-green-600 transition-colors p-1 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800"
+                title="Ayuda del formulario"
+                type="button"
+            >
+                <QuestionMarkCircleIcon className="h-5 w-5" />
+            </button>
+          </div>
+        }
         className="max-w-xl"
       >
         <form onSubmit={handleFormSubmit} className="space-y-5">
@@ -482,7 +560,7 @@ export default function IngresosPage() {
               <div key={idx} className="relative bg-white dark:bg-slate-900 p-3 rounded-md shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col gap-3 animate-in slide-in-from-left-2 duration-300">
                 
                 <div className="flex gap-3 items-start w-full">
-                    {/* INPUT DE DESCRIPCIÓN (Solo si hay > 1 item) */}
+                    {/* INPUT DE DESCRIPCIÓN */}
                     {formData.items.length > 1 && (
                         <div className="flex-1">
                             <input 
@@ -578,7 +656,9 @@ export default function IngresosPage() {
         </form>
       </Modal>
 
-      {/* --- MODAL CONFIRMACIÓN DE NUEVA CATEGORÍA --- */}
+      {/* --- MODALES DE CONFIRMACIÓN Y ALERTA --- */}
+      
+      {/* 1. Modal Confirmación Nueva Categoría */}
       <Modal
         isOpen={isCategoryConfirmOpen}
         onClose={() => setIsCategoryConfirmOpen(false)}
@@ -615,16 +695,40 @@ export default function IngresosPage() {
         </div>
       </Modal>
 
-      {/* MODAL ELIMINAR */}
-      <Modal isOpen={isDeleteOpen} onClose={() => setIsDeleteOpen(false)} title="Confirmar Eliminación" className="max-w-md">
-        <div className="space-y-4">
-           <p className="text-slate-600">¿Eliminar ingreso de <strong>{currentIngreso?.descripcion}</strong>?</p>
-           <div className="flex justify-end gap-3">
-              <Button variant="outline" onClick={() => setIsDeleteOpen(false)}>No, cancelar</Button>
-              <Button variant="destructive" onClick={handleDelete}>Sí, eliminar</Button>
-           </div>
+      {/* 2. Modal Eliminar CORREGIDO */}
+      <Modal 
+        isOpen={isDeleteOpen} 
+        onClose={() => setIsDeleteOpen(false)} 
+        // ✅ Título compuesto movido al prop title
+        title={
+          <div className="flex items-center gap-2">
+             <div className="p-1.5 rounded-md bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400">
+               <TrashIcon className="h-5 w-5" />
+             </div>
+             <span>Confirmar Eliminación</span>
+          </div>
+        }
+        className="max-w-md border-l-4 border-l-red-500"
+      >
+        <div className="space-y-4 pt-2">
+            {/* Cuerpo limpio: solo texto */}
+            <div className="text-sm text-muted-foreground">
+                {MODAL_REGISTRY.DELETE_INGRESO_HELP.content({ 
+                    descripcion: currentIngreso?.descripcion 
+                })}
+            </div>
+
+            <div className="flex justify-end gap-3 pt-4 mt-2 border-t border-border/50">
+                <Button variant="outline" onClick={() => setIsDeleteOpen(false)}>Cancelar</Button>
+                <Button variant="destructive" onClick={handleDelete} disabled={isSubmitting}>
+                    {isSubmitting ? "Eliminando..." : "Sí, eliminar"}
+                </Button>
+            </div>
         </div>
       </Modal>
+
+      {/* 3. Modal Genérico de Ayuda CORREGIDO */}
+      <GenericModal />
 
     </div>
   );

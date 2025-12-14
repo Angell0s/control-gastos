@@ -1,4 +1,4 @@
-#backend\app\schemas\income.py
+# backend\app\schemas\income.py
 from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Optional
 from uuid import UUID
@@ -14,6 +14,12 @@ class IngresoItemBase(BaseModel):
 class IngresoItemCreate(IngresoItemBase):
     pass
 
+# ✅ Nuevo esquema para Items en la ACTUALIZACIÓN
+class IngresoItemUpdateDTO(IngresoItemBase):
+    # Permite al frontend enviar el ID para identificar el item a editar/borrar.
+    # Si viene None, se asume que es un item nuevo a crear.
+    id: Optional[UUID] = None 
+
 class IngresoItemResponse(IngresoItemBase):
     id: UUID
     model_config = ConfigDict(from_attributes=True)
@@ -27,15 +33,16 @@ class IngresoBase(BaseModel):
     fuente: Optional[str] = Field(None, max_length=100)
 
 class IngresoCreate(IngresoBase):
-    # Recibimos una lista de items al crear
+    # Recibimos una lista de items al crear (usan IngresoItemCreate)
     items: List[IngresoItemCreate]
 
 class IngresoUpdate(BaseModel):
     descripcion: Optional[str] = Field(None, max_length=100)
     fecha: Optional[datetime] = None
     fuente: Optional[str] = Field(None, max_length=100)
-    # Actualizar items es complejo, usualmente se maneja en endpoints separados 
-    # o reemplazando la lista completa.
+    
+    # ✅ Cambio clave: Usamos el nuevo DTO para soportar IDs opcionales
+    items: List[IngresoItemUpdateDTO]
     
 class IngresoResponse(IngresoBase):
     id: UUID

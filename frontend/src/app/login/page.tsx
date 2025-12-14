@@ -7,15 +7,21 @@ import api from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { FancyCheckbox } from '@/components/ui/FancyCheckbox'; // ✅ Importamos el nuevo componente
-import PrivacyModal from '@/components/PrivacyModal';
+import { FancyCheckbox } from '@/components/ui/FancyCheckbox';
 import Link from 'next/link';
+import { DocumentTextIcon } from "@heroicons/react/24/outline";
+
+// ✅ Importamos el hook del sistema de modales
+import { useModal } from '@/components/providers/ModalProvider';
 
 export default function LoginPage() {
   const router = useRouter();
   
   const setToken = useAuthStore((state) => state.setToken);
   const isAuth = useAuthStore((state) => state.isAuth);
+  
+  // ✅ Hook para abrir modales globales
+  const { openModal } = useModal(); 
 
   // Estados comunes
   const [isRegister, setIsRegister] = useState(false);
@@ -23,12 +29,10 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   
-  const [isPrivacyOpen, setIsPrivacyOpen] = useState(false);
-
   // Login states
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [rememberMe, setRememberMe] = useState(false); // ✅ Nuevo estado para "Recuérdame"
+  const [rememberMe, setRememberMe] = useState(false);
 
   // Register states
   const [regEmail, setRegEmail] = useState('');
@@ -43,6 +47,21 @@ export default function LoginPage() {
     }
   }, [isAuth, router]);
 
+  // ✅ Función centralizada para abrir el modal de privacidad con el botón extra
+  const handleOpenPrivacy = () => {
+    openModal("PRIVACY_POLICY", {
+        // Pasamos el botón de redirección como footer extra
+        extraFooter: (
+            <Link href="/priv" target="_blank" className="w-full sm:w-auto block sm:mr-auto">
+                <Button variant="outline" className="w-full gap-2 border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800">
+                    <DocumentTextIcon className="h-4 w-4" />
+                    Ver documento completo
+                </Button>
+            </Link>
+        )
+    });
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -54,8 +73,6 @@ export default function LoginPage() {
       formData.append('username', email);
       formData.append('password', password);
       
-      // ✅ Enviamos el parámetro extra si está marcado
-      // Ajusta "remember_me" al nombre exacto que espera tu endpoint (ej: "scope", "remember", etc.)
       if (rememberMe) {
           formData.append('remember_me', 'true'); 
       }
@@ -116,7 +133,8 @@ export default function LoginPage() {
   if (isAuth) return null; 
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-100 dark:bg-gray-950 transition-colors duration-300 px-4">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-gray-100 dark:bg-gray-950 transition-colors duration-300 px-4">
+      
       <div className="w-full max-w-md p-8 bg-white dark:bg-gray-900 rounded-lg shadow-md border border-gray-200 dark:border-gray-800 transition-all duration-300">
         
         <h2 className="text-2xl font-bold text-center text-gray-800 dark:text-white mb-6">
@@ -136,7 +154,6 @@ export default function LoginPage() {
 
         {isRegister ? (
           <form onSubmit={handleRegister} className="space-y-4">
-            {/* ... (Inputs de registro sin cambios) ... */}
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email *</label>
               <Input type="email" value={regEmail} onChange={(e) => setRegEmail(e.target.value)} placeholder="tu@email.com" required className="dark:bg-gray-950 dark:border-gray-700" />
@@ -161,7 +178,6 @@ export default function LoginPage() {
             </div>
 
             <div className="flex items-start gap-2 pt-2">
-              {/* Reutilizamos el FancyCheckbox aquí también para términos si quieres, o dejamos el nativo */}
               <input 
                 type="checkbox" 
                 id="terms" 
@@ -170,7 +186,11 @@ export default function LoginPage() {
               />
               <label htmlFor="terms" className="text-sm text-gray-600 dark:text-gray-400 cursor-pointer">
                 He leído y acepto la{' '}
-                <button type="button" onClick={() => setIsPrivacyOpen(true)} className="text-blue-600 dark:text-blue-400 hover:underline font-medium focus:outline-none">
+                <button 
+                    type="button" 
+                    onClick={handleOpenPrivacy} 
+                    className="text-blue-600 dark:text-blue-400 hover:underline font-medium focus:outline-none"
+                >
                   Política de Privacidad
                 </button>
                 {' '}y el procesamiento de mis datos personales.
@@ -193,15 +213,12 @@ export default function LoginPage() {
               <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="******" required className="dark:bg-gray-950 dark:border-gray-700" />
             </div>
 
-            {/* ✅ AQUÍ AGREGAMOS EL CHECKBOX RECUÉRDAME */}
             <div className="flex items-center justify-between">
                 <FancyCheckbox 
                     checked={rememberMe}
                     onChange={setRememberMe}
                     label="Recuérdame"
                 />
-                {/* Opcional: Enlace de olvidaste contraseña */}
-                {/* <Link href="#" className="text-xs text-blue-600 hover:underline">¿Olvidaste tu contraseña?</Link> */}
             </div>
 
             <Button type="submit" isLoading={loading} className="w-full" size="lg">
@@ -228,10 +245,19 @@ export default function LoginPage() {
         </div>
       </div>
 
-      <PrivacyModal 
-        isOpen={isPrivacyOpen} 
-        onClose={() => setIsPrivacyOpen(false)} 
-      />
+      {/* ✅ Footer externo visible siempre */}
+      <div className="mt-8 text-center text-xs text-gray-500 dark:text-gray-500">
+        <button 
+            type="button"
+            onClick={handleOpenPrivacy}
+            className="hover:underline hover:text-gray-800 dark:hover:text-gray-300 transition-colors"
+        >
+            Aviso de Privacidad
+        </button>
+        <span className="mx-2">•</span>
+        <span>© {new Date().getFullYear()} Gastos App</span>
+      </div>
+      
     </div>
   );
 }

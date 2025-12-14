@@ -3,61 +3,20 @@ from typing import List, Any, Optional
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, or_
+from sqlalchemy import select, delete
 from sqlalchemy.orm import selectinload
 
 from app.api import deps
-from app.models import Expense, ExpenseItem, User, Category
+from app.models import Expense, ExpenseItem, User
 from app.schemas import ExpenseCreate, ExpenseResponse
 from app.services.audit import log_activity 
-from app.services.utils import get_or_create_category_by_name 
+# Importamos helpers reutilizables
+from app.services.utils import get_or_create_category_by_name, validate_categories_availability 
 
 router = APIRouter()
 
 # ============================================================================
-# 🛡️ HELPER: VALIDACIÓN DE CATEGORÍAS
-# ============================================================================
-async def _validate_expense_categories(db: AsyncSession, items: list, user_id: UUID):
-    """
-    Valida que todas las categorías usadas existan, sean del usuario (o globales)
-    y estén activas. Permite category_id = None sin problemas (se asignarán a 'Otros' luego).
-    """
-    if not items:
-        return
-
-    # Solo validar las categorías que realmente tienen ID (ignorar None)
-    category_ids = {item.category_id for item in items if item.category_id is not None}
-    
-    if not category_ids:  # Todos son null o lista vacía → todo OK
-        return
-
-    stmt = select(Category).where(
-        Category.id.in_(category_ids),
-        or_(Category.user_id == user_id, Category.user_id.is_(None))
-    )
-    result = await db.execute(stmt)
-    found_categories = result.scalars().all()
-    found_map = {cat.id: cat for cat in found_categories}
-
-    for cat_id in category_ids:
-        cat = found_map.get(cat_id)
-        
-        # 1. ¿Existe y tengo permiso?
-        if not cat:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Categoría con ID {cat_id} no existe o no tienes acceso."
-            )
-        
-        # 2. ¿Está activa?
-        if not cat.is_active:
-            raise HTTPException(
-                status_code=400,
-                detail=f"La categoría '{cat.name}' está desactivada y no puede usarse en nuevos gastos."
-            )
-
-# ============================================================================
-# 1. CREATE (POST) - CON VALIDACIÓN Y ASIGNACIÓN "OTROS"
+# 1. CREATE (POST)
 # ============================================================================
 @router.post("/", response_model=ExpenseResponse, status_code=status.HTTP_201_CREATED)
 async def create_expense(
@@ -71,8 +30,8 @@ async def create_expense(
     - Valida categorías activas antes de guardar.
     - Asigna 'Otros' si no hay categoría.
     """
-    # 🔍 PASO PREVIO: Validar Categorías explícitas
-    await _validate_expense_categories(db, expense_in.items, current_user.id)
+    # 🔍 Validar Categorías explícitas usando helper compartido
+    await validate_categories_availability(db, expense_in.items, current_user.id)
 
     # 1. Calcular total en memoria
     calculated_total = sum(item.amount * item.quantity for item in expense_in.items)
@@ -137,6 +96,7 @@ async def create_expense(
 
     return db_expense
 
+
 # ============================================================================
 # 2. READ ALL (GET LIST)
 # ============================================================================
@@ -162,6 +122,7 @@ async def read_expenses(
     result = await db.execute(stmt)
     return result.scalars().all()
 
+
 # ============================================================================
 # 3. READ ONE (GET BY ID)
 # ============================================================================
@@ -186,6 +147,7 @@ async def read_expense_by_id(
         raise HTTPException(status_code=403, detail="No tienes permiso para ver este gasto")
         
     return expense
+
 
 # ============================================================================
 # 4. DELETE
@@ -216,8 +178,9 @@ async def delete_expense(
 
     return Response(status_code=204)
 
+
 # ============================================================================
-# 5. UPDATE (PUT) - REEMPLAZO COMPLETO CON VALIDACIÓN Y "OTROS"
+# 5. UPDATE (PUT)
 # ============================================================================
 @router.put("/{expense_id}", response_model=ExpenseResponse)
 async def update_expense(
@@ -237,8 +200,8 @@ async def update_expense(
     if expense.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="No tienes permiso para editar este gasto")
 
-    # 🔍 PASO PREVIO: Validar Nuevas Categorías explícitas
-    await _validate_expense_categories(db, expense_in.items, current_user.id)
+    # 🔍 Validar Nuevas Categorías explícitas usando helper compartido
+    await validate_categories_availability(db, expense_in.items, current_user.id)
 
     try:
         # 2. Actualizar campos directos
