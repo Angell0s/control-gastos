@@ -14,7 +14,7 @@ app = FastAPI(
 origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "http://192.168.1.12:3000",  # <--- Tu IP específica
+    "http://192.168.1.2:3000",  # <--- Tu IP específica
     "http://192.168.1.7:3000",
     "http://192.168.1.7:61772",
 ]

@@ -1,6 +1,7 @@
 # 💰 Control de Gastos Personal
 
-Una aplicación Full-Stack robusta para la gestión de finanzas personales, construida con arquitectura moderna, escalable y contenedorizada.
+Una aplicación Full-Stack robusta para la gestión de finanzas personales, diseñada con una arquitectura escalable, modular y totalmente contenedorizada.
+Este proyecto destaca por una separación de responsabilidades clara, validación estricta de datos y un entorno de desarrollo híbrido (Docker + Local) optimizado.
 
 ## 🚀 Tech Stack
 
@@ -136,3 +137,11 @@ El sistema está configurado para detectar automáticamente el entorno.
 *   **Local:** Se conecta a `localhost`.
 *   **Docker:** Se conecta a `db` (host interno).
 *   Si falla en local, verifica que el contenedor Docker esté corriendo (`docker ps`) y exponiendo el puerto `5432`.
+
+##💡 Notas de Desarrollo y Metodología
+
+**Enfoque Backend-First:** El núcleo del proyecto es la robustez del backend. Se ha priorizado la seguridad, la estructura de base de datos y la limpieza del código en Python.
+**Uso de Herramientas IA:** Para el desarrollo de este proyecto se utilizaron LLMs (como herramientas de apoyo) con el objetivo de:
+*   Acelerar el prototipado del Frontend (Next.js), permitiendo un enfoque mayor en la lógica del servidor.
+*   Optimización de algoritmos y refactoring de código repetitivo.
+*   Code Review simulado para detectar posibles vulnerabilidades antes del commit.

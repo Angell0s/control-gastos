@@ -2,8 +2,7 @@
 "use client";
 
 import { AsyncSearchSelect } from "@/components/ui/AsyncSearchSelect";
-import { useCategorySelector, Category } from "@/hooks/useCategorySelector";
-import type { AsyncOption } from "@/components/ui/AsyncSearchSelect";
+import { useCategorySelector, type Category } from "@/hooks/useCategorySelector";
 
 export function CategorySelector(props: {
   value: string | null;
@@ -14,9 +13,14 @@ export function CategorySelector(props: {
 
   fetchUrl?: string;
   allowReactivatePrompt?: boolean;
-
-  onCreateOptionOverride?: (label: string) => Promise<AsyncOption | null>;
   isModalActionLoading?: boolean;
+
+  onReactivateConfirm?: (cat: Category) => Promise<void> | void;
+  onAfterCreate?: (newCat: Category) => Promise<void> | void;
+  onAfterReactivate?: (reactivatedCat: Category) => Promise<void> | void;
+
+  className?: string;
+  placeholder?: string;
 }) {
   const s = useCategorySelector({
     categories: props.categories,
@@ -24,17 +28,20 @@ export function CategorySelector(props: {
     onSelect: props.onSelect,
     fetchUrl: props.fetchUrl,
     allowReactivatePrompt: props.allowReactivatePrompt,
-    onCreateOptionOverride: props.onCreateOptionOverride,
     isModalActionLoading: props.isModalActionLoading,
+    onReactivateConfirm: props.onReactivateConfirm,
+    onAfterCreate: props.onAfterCreate,
+    onAfterReactivate: props.onAfterReactivate,
   });
 
   return (
     <AsyncSearchSelect
+      className={props.className}
       value={props.value}
       onChange={s.onChange}
       fetchUrl={s.fetchUrl}
       queryParam="search"
-      placeholder="Buscar..."
+      placeholder={props.placeholder ?? "Buscar..."}
       initialOptions={s.initialOptions}
       creatable={true}
       onCreateOption={s.onCreateOption}

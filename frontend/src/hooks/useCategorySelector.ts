@@ -7,22 +7,33 @@ import { toast } from "sonner";
 import { useModal } from "@/components/providers/ModalProvider";
 import type { AsyncOption } from "@/components/ui/AsyncSearchSelect";
 
-export type Category = { id: string; name: string; is_active: boolean };
+export type Category = {
+  id: string;
+  name: string;
+  is_active: boolean;
+};
 
 type Params = {
   categories: Category[];
   setCategories: React.Dispatch<React.SetStateAction<Category[]>>;
 
-  // valor seleccionado lo maneja el padre (tu row)
+  // controlado por el padre
   onSelect: (categoryId: string | null) => void;
 
-  // config
-  fetchUrl?: string; // default: "/categories/?status=all"
-  allowReactivatePrompt?: boolean; // default: true (como Gastos)
+  fetchUrl?: string;
+  allowReactivatePrompt?: boolean;
 
-  // si quieres que Ingresos “difera” la creación, sobreescribe esto
-  onCreateOptionOverride?: (label: string) => Promise<AsyncOption | null>;
-  isModalActionLoading?: boolean; // si tu ModalProvider lo usa
+  // spinner si tu ModalProvider lo soporta
+  isModalActionLoading?: boolean;
+
+  // NUEVO: reactivación real (API) si quieres
+  onReactivateConfirm?: (cat: Category) => Promise<void> | void;
+
+  // NUEVO: callback post-creación (para refrescar listas/abrir detalles)
+  onAfterCreate?: (newCat: Category) => Promise<void> | void;
+
+  // NUEVO: callback post-reactivación (para refrescar listas)
+  onAfterReactivate?: (reactivatedCat: Category) => Promise<void> | void;
 };
 
 export function useCategorySelector({
@@ -31,8 +42,10 @@ export function useCategorySelector({
   onSelect,
   fetchUrl = "/categories/?status=all",
   allowReactivatePrompt = true,
-  onCreateOptionOverride,
   isModalActionLoading = false,
+  onReactivateConfirm,
+  onAfterCreate,
+  onAfterReactivate,
 }: Params) {
   const { openModal, closeModal } = useModal();
 
@@ -48,29 +61,58 @@ export function useCategorySelector({
 
   const onChange = useCallback(
     (newVal: string | null) => {
-      if (!newVal) return onSelect(null);
+      if (!newVal) {
+        onSelect(null);
+        return;
+      }
 
-      const selectedCat = categories.find((c) => c.id === newVal);
+      const selected = categories.find((c) => c.id === newVal);
 
-      if (allowReactivatePrompt && selectedCat && !selectedCat.is_active) {
+      if (allowReactivatePrompt && selected && !selected.is_active) {
         openModal("REACTIVATE_CATEGORY", {
-          categoryName: selectedCat.name,
+          categoryName: selected.name,
           confirmText: "Reactivar y Usar",
-          onConfirm: () => {
-            onSelect(newVal);
-            toast.info("Categoría seleccionada para reactivación.");
-            closeModal();
+          isSubmitting: isModalActionLoading,
+
+          onConfirm: async () => {
+            try {
+              // si el padre pasa onReactivateConfirm, aquí se reactiva “de verdad”
+              if (onReactivateConfirm) {
+                await onReactivateConfirm(selected);
+              } else {
+                toast.info("Categoría seleccionada para reactivación.");
+              }
+
+              if (onAfterReactivate) await onAfterReactivate(selected);
+
+              onSelect(newVal);
+              closeModal();
+            } catch (err) {
+              console.error(err);
+              toast.error("No se pudo reactivar la categoría.");
+              closeModal();
+            }
           },
         });
+
         return;
       }
 
       onSelect(newVal);
     },
-    [allowReactivatePrompt, categories, onSelect, openModal, closeModal]
+    [
+      allowReactivatePrompt,
+      categories,
+      closeModal,
+      isModalActionLoading,
+      onAfterReactivate,
+      onReactivateConfirm,
+      onSelect,
+      openModal,
+    ]
   );
 
-  const onCreateOptionDefault = useCallback(
+  const onCreateOption = useCallback(
     (inputValue: string): Promise<AsyncOption | null> => {
       return new Promise((resolve) => {
         openModal("CREATE_CATEGORY_PRIVATE", {
@@ -86,12 +128,20 @@ export function useCategorySelector({
               });
 
               const newCat = res.data;
-              setCategories((prev) => [...prev, newCat]);
 
-              toast.success(`Categoría privada "${newCat.name}" creada`);
+              setCategories((prev) => {
+                const next = [...prev, newCat];
+                next.sort((a, b) => a.name.localeCompare(b.name));
+                return next;
+              });
+
+              toast.success(`Categoría "${newCat.name}" creada`);
+              if (onAfterCreate) await onAfterCreate(newCat);
+
               resolve({ value: newCat.id, label: newCat.name, raw: newCat });
               closeModal();
-            } catch (e) {
+            } catch (err) {
+              console.error("Error creando categoría", err);
               toast.error("Error al crear categoría");
               resolve(null);
               closeModal();
@@ -102,13 +152,8 @@ export function useCategorySelector({
         });
       });
     },
-    [openModal, closeModal, isModalActionLoading, setCategories]
+    [closeModal, isModalActionLoading, onAfterCreate, openModal, setCategories]
   );
 
-  return {
-    fetchUrl,
-    initialOptions,
-    onChange,
-    onCreateOption: onCreateOptionOverride ?? onCreateOptionDefault,
-  };
+  return { fetchUrl, initialOptions, onChange, onCreateOption };
 }
