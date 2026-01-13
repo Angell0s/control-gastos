@@ -138,7 +138,7 @@ El sistema está configurado para detectar automáticamente el entorno.
 *   **Docker:** Se conecta a `db` (host interno).
 *   Si falla en local, verifica que el contenedor Docker esté corriendo (`docker ps`) y exponiendo el puerto `5432`.
 
-##💡 Notas de Desarrollo y Metodología
+## 💡 Notas de Desarrollo y Metodología
 
 **Enfoque Backend-First:** El núcleo del proyecto es la robustez del backend. Se ha priorizado la seguridad, la estructura de base de datos y la limpieza del código en Python.
 **Uso de Herramientas IA:** Para el desarrollo de este proyecto se utilizaron LLMs (como herramientas de apoyo) con el objetivo de:
