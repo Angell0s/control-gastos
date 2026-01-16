@@ -4,20 +4,44 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 from alembic import context
 
-# 1. Agregar ruta actual para encontrar 'app'
+# 1. Agregar ruta actual
 sys.path.append(os.getcwd())
 
-# 2. Importar config y MODELOS
-from app.core.config import settings
+# 2. Importar MODELOS (Vital para que Alembic vea las tablas)
 from app.db.session import Base
-from app.models import User  # ¡Esto registra la tabla!
+from app.models import User 
+
+# NOTA: NO importamos 'settings' para la URL para evitar conflictos.
+# Leemos directo del entorno.
 
 config = context.config
 
-# 3. Usar la URL inteligente de settings
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# =======================================================
+# LÓGICA DE URL SEGURA
+# =======================================================
+def get_url():
+    # Leemos la variable que YA VIMOS que existe con grep
+    url = os.getenv("DATABASE_URL")
+    
+    if not url:
+        # Fallback solo si algo muy raro pasa
+        return "postgresql://user:pass@localhost/dbname"
 
-fileConfig(config.config_file_name)
+    # Imprimimos para que veas en consola qué está usando
+    print(f"🔵 DEBUG ALEMBIC - URL ENCONTRADA: {url}")
+
+    # FIX: Alembic no soporta 'asyncpg', lo cambiamos a driver estándar
+    if "+asyncpg" in url:
+        url = url.replace("+asyncpg", "")
+    
+    return url
+
+# Sobrescribimos la configuración
+config.set_main_option("sqlalchemy.url", get_url())
+
+# Configurar logs
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
 

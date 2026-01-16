@@ -1,4 +1,4 @@
-version: '3.8'
+
 
 services:
   # PostgreSQL Database
@@ -44,10 +44,12 @@ services:
       dockerfile: Dockerfile
     container_name: gastos_backend
     restart: unless-stopped
+    environment:
+      - RUNNING_IN_DOCKER=true
     env_file:
       - .env
     ports:
-      - "8000:8000"
+      - "8001:8000"
     depends_on:
       db:
         condition: service_healthy
@@ -57,7 +59,7 @@ services:
       - ./backend:/app
     networks:
       - gastos_network
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   # Worker de tareas
   worker:
@@ -111,9 +113,23 @@ services:
       - ./frontend:/app
       - /app/node_modules
       - /app/.next
+      # --- SOLUCIÓN AQUÍ ---
+      # Mapeamos el .env de la raíz al lugar donde Next.js lo espera
+      - ./.env:/app/.env 
     networks:
       - gastos_network
     command: npm run dev
+
+  # Túnel de Cloudflare
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared-tunnel
+    restart: unless-stopped
+    profiles:
+      - production
+    command: tunnel run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    networks:
+      - gastos_network
 
 networks:
   gastos_network:
