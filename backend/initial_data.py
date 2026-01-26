@@ -1,3 +1,4 @@
+#backend\initial_data.py
 import sys
 import os
 import asyncio  # <--- Necesario para correr código async

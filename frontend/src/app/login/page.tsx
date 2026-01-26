@@ -13,7 +13,7 @@ import { DocumentTextIcon } from "@heroicons/react/24/outline";
 
 // ✅ Importamos el hook del sistema de modales
 import { useModal } from '@/components/providers/ModalProvider';
-
+console.log("ENV API:", process.env.NEXT_PUBLIC_API_URL)
 export default function LoginPage() {
   const router = useRouter();
   
