@@ -37,12 +37,12 @@ import { ThemeToggle } from "./ThemeToggle";
 type NavItem = {
   name: string;
   href: string;
-  icon: (props: React.ComponentProps<'svg'>) => JSX.Element;
+  icon: (props: React.ComponentProps<'svg'>) => React.JSX.Element;
   requiredPermission?: 'superuser';
   children?: {
     name: string;
     href: string;
-    icon?: (props: React.ComponentProps<'svg'>) => JSX.Element;
+    icon?: (props: React.ComponentProps<'svg'>) => React.JSX.Element;
     action?: string;
   }[];
 };
