@@ -1,7 +1,6 @@
-// frontend/src/components/ui/Sidebar.tsx
 "use client";
 
-import { useState, useEffect } from "react"; // Añadido useEffect
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
@@ -33,20 +32,26 @@ import { useAuthStore } from "@/store/authStore";
 import { useUIStore } from "@/store/uiStore";
 import { ThemeToggle } from "./ThemeToggle";
 
-type IconSVGProps =
-  React.PropsWithoutRef<React.SVGProps<SVGSVGElement>> &
-  React.RefAttributes<SVGSVGElement>;
+// --- 1. DEFINICIÓN ROBUSTA DE TIPOS ---
 
-type IconProps = IconSVGProps & { title?: string; titleId?: string };
+// Tipo exacto para componentes de Heroicons (v2)
+type HeroIcon = React.ForwardRefExoticComponent<
+  Omit<React.SVGProps<SVGSVGElement>, "ref"> & {
+    title?: string | undefined;
+    titleId?: string | undefined;
+  } & React.RefAttributes<SVGSVGElement>
+>;
 
-type IconType = React.FC<IconProps>;
+// Definimos las acciones posibles (mejora mantenibilidad)
+type SidebarAction = "new-expense" | "edit-expense" | "delete-expense";
 
 interface NavItem {
   name: string;
   href: string;
-  icon: IconType;
+  icon: HeroIcon; // Usamos el tipo estricto aquí
   requiredPermission?: "superuser";
-  children?: { name: string; href: string; icon: IconType }[];
+  action?: SidebarAction; // ✅ Añadido explícitamente para evitar el error
+  children?: NavItem[];   // Recursividad: los hijos usan la misma estructura
 }
 
 const navigation: NavItem[] = [
@@ -58,6 +63,7 @@ const navigation: NavItem[] = [
     icon: BanknotesIcon,
     children: [
       { name: "Ver Listado", href: "/gastos", icon: ListBulletIcon },
+      // ✅ Ahora TypeScript sabe que 'action' es una propiedad válida
       { name: "Registrar Nuevo", href: "/gastos?action=new", icon: PlusIcon, action: "new-expense" }
     ]
   },
@@ -67,7 +73,8 @@ const navigation: NavItem[] = [
   { name: "Bitácora", href: "/bitacora", icon: ClipboardDocumentListIcon, requiredPermission: 'superuser' },
 ];
 
-// --- COMPONENTE DE DETALLE DE USUARIO + BOTÓN CERRAR SESIÓN (MÓVIL) ---
+// --- 2. COMPONENTES AUXILIARES ---
+
 const UserProfileDetail = ({ user, onLogout }: { user: any, onLogout: () => void }) => (
   <div className="space-y-6">
     {/* Header Avatar */}
@@ -86,7 +93,6 @@ const UserProfileDetail = ({ user, onLogout }: { user: any, onLogout: () => void
 
     {/* Detalles */}
     <div className="grid grid-cols-1 gap-4">
-       {/* ... Sección Info Contacto (Sin cambios) ... */}
        <div className="space-y-3">
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pl-1">
           Información de Contacto
@@ -128,7 +134,6 @@ const UserProfileDetail = ({ user, onLogout }: { user: any, onLogout: () => void
         </div>
       </div>
 
-      {/* BOTÓN CERRAR SESIÓN (SOLO VISIBLE EN MÓVIL DENTRO DEL MODAL) */}
       <div className="lg:hidden pt-4 border-t border-border mt-4">
         <Button 
             variant="destructive" 
@@ -143,7 +148,8 @@ const UserProfileDetail = ({ user, onLogout }: { user: any, onLogout: () => void
   </div>
 );
 
-// --- SIDEBAR PRINCIPAL ---
+// --- 3. COMPONENTE PRINCIPAL ---
+
 export function Sidebar() {
   const router = useRouter();
   const pathname = usePathname();
@@ -158,25 +164,22 @@ export function Sidebar() {
   const { isSidebarCollapsed, toggleSidebar } = useUIStore();
 
   const handleLogout = () => {
-    setIsProfileModalOpen(false); // Cerrar modal si estaba abierto
-    setIsMobileMenuOpen(false); // Cerrar menú si estaba abierto
+    setIsProfileModalOpen(false);
+    setIsMobileMenuOpen(false);
     logout();
     setTheme("system");
     router.push("/login");
   };
 
-  // Cerrar menú móvil automáticamente al cambiar de ruta
   useEffect(() => {
      setIsMobileMenuOpen(false);
   }, [pathname]);
 
-  // Función helper para navegar y cerrar menú
   const handleMobileNavigation = (href?: string) => {
       setIsMobileMenuOpen(false);
       if(href) router.push(href);
   };
 
-  // Helpers de usuario
   const displayName = user?.first_name && user?.last_name
       ? `${user.first_name} ${user.last_name}`
       : user?.email || "Cargando...";
@@ -201,13 +204,15 @@ export function Sidebar() {
     }
   };
 
-  // --- RENDER NAV ITEMS ---
   const renderNavItems = (isMobile: boolean) => (
     <ul className="space-y-1">
       {filteredNavigation.map((item) => {
         const isActive = pathname === item.href;
         const hasChildren = !!item.children;
         const isOpen = openSubmenu === item.name;
+
+        // Recuperamos el icono con mayúscula para usarlo como componente JSX
+        const ItemIcon = item.icon;
 
         return (
           <li key={item.name}>
@@ -222,7 +227,7 @@ export function Sidebar() {
                   )}
                 >
                   <div className="flex items-center">
-                    <item.icon className={cn("flex-shrink-0 transition-all", (isSidebarCollapsed && !isMobile) ? "h-6 w-6" : "h-5 w-5 mr-3", (isActive || isOpen) ? "text-primary" : "")} />
+                    <ItemIcon className={cn("flex-shrink-0 transition-all", (isSidebarCollapsed && !isMobile) ? "h-6 w-6" : "h-5 w-5 mr-3", (isActive || isOpen) ? "text-primary" : "")} />
                     <span className={cn("text-sm whitespace-nowrap transition-all duration-300", (isSidebarCollapsed && !isMobile) ? "w-0 opacity-0 hidden" : "w-auto opacity-100 block")}>
                       {item.name}
                     </span>
@@ -236,6 +241,8 @@ export function Sidebar() {
                   <div className="mt-1 ml-4 pl-2 border-l border-border space-y-1 animate-in slide-in-from-top-1 duration-200">
                     {item.children!.map((subItem) => {
                       const isSubActive = pathname === subItem.href.split('?')[0] && (!subItem.action || pathname.includes("action"));
+                      const SubIcon = subItem.icon;
+                      
                       return (
                         <Link
                           key={subItem.name}
@@ -244,11 +251,11 @@ export function Sidebar() {
                           className={cn(
                             "flex items-center px-3 py-1.5 text-sm rounded-md transition-colors",
                             isSubActive 
-                              ? "text-primary font-medium bg-primary/5" 
-                              : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                            ? "text-primary font-medium bg-primary/5" 
+                            : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
                           )}
                         >
-                          {subItem.icon && <subItem.icon className="h-4 w-4 mr-2 opacity-70" />}
+                          {SubIcon && <SubIcon className="h-4 w-4 mr-2 opacity-70" />}
                           {subItem.name}
                         </Link>
                       )
@@ -267,7 +274,7 @@ export function Sidebar() {
                 )}
               >
                 {(isActive && !isSidebarCollapsed && !isMobile) && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-primary rounded-r-full" />}
-                <item.icon className={cn("flex-shrink-0 transition-all", (isSidebarCollapsed && !isMobile) ? "h-6 w-6" : "h-5 w-5 mr-3", isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground")} />
+                <ItemIcon className={cn("flex-shrink-0 transition-all", (isSidebarCollapsed && !isMobile) ? "h-6 w-6" : "h-5 w-5 mr-3", isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground")} />
                 <span className={cn("text-sm whitespace-nowrap transition-all duration-300", (isSidebarCollapsed && !isMobile) ? "w-0 opacity-0 hidden" : "w-auto opacity-100 block")}>
                   {item.name}
                 </span>
@@ -280,7 +287,8 @@ export function Sidebar() {
   );
 
   // Helper Bottom Nav
-  const BottomNavItem = ({ icon: Icon, label, href, isActive, onClick }: any) => (
+  // Tipamos explícitamente el prop icon
+  const BottomNavItem = ({ icon: Icon, label, href, isActive, onClick }: { icon: HeroIcon, label: string, href?: string, isActive: boolean, onClick?: () => void }) => (
     <div 
       onClick={() => {
         if (onClick) onClick();
@@ -298,11 +306,7 @@ export function Sidebar() {
 
   return (
     <>
-      {/* ==========================================
-          MOBILE DRAWER (Menú Expandible)
-         ========================================== */}
-      
-      {/* 1. Backdrop */}
+      {/* MOBILE DRAWER */}
       <div
           className={cn(
             "fixed inset-0 bg-black/60 z-[35] lg:hidden transition-opacity duration-300 backdrop-blur-sm",
@@ -311,29 +315,27 @@ export function Sidebar() {
           onClick={() => setIsMobileMenuOpen(false)}
       />
 
-      {/* 2. Drawer Container */}
       <div 
         className={cn(
           "fixed bottom-[64px] left-0 right-0 bg-card z-[36] lg:hidden",
           "rounded-t-2xl border-t border-border shadow-[0_-4px_20px_rgba(0,0,0,0.2)]",
           "flex flex-col max-h-[80vh] overflow-hidden",
-          // ANIMACIÓN CRÍTICA: Siempre tiene transition, solo cambia el translate
           "transition-transform duration-300 ease-out will-change-transform",
           isMobileMenuOpen ? "translate-y-0" : "translate-y-[150%]"
         )}
       >
-         <div className="w-full flex justify-center pt-3 pb-1 cursor-grab active:cursor-grabbing" onClick={() => setIsMobileMenuOpen(false)}>
+          <div className="w-full flex justify-center pt-3 pb-1 cursor-grab active:cursor-grabbing" onClick={() => setIsMobileMenuOpen(false)}>
            <div className="w-12 h-1.5 rounded-full bg-muted hover:bg-muted-foreground/50 transition-colors" />
-         </div>
+          </div>
 
-         <div className="px-4 py-2 flex items-center justify-between border-b border-border/50">
+          <div className="px-4 py-2 flex items-center justify-between border-b border-border/50">
             <span className="text-sm font-bold text-muted-foreground uppercase tracking-wider">Menú</span>
             <Button variant="ghost" size="sm" onClick={() => setIsMobileMenuOpen(false)} className="h-8 w-8 p-0 rounded-full">
                <XMarkIcon className="h-5 w-5" />
             </Button>
-         </div>
+          </div>
 
-         <div className="overflow-y-auto p-4 space-y-4 custom-scrollbar pb-8">
+          <div className="overflow-y-auto p-4 space-y-4 custom-scrollbar pb-8">
             <nav>{renderNavItems(true)}</nav>
             
             <div className="pt-4 border-t border-border space-y-3">
@@ -341,14 +343,11 @@ export function Sidebar() {
                    <span className="text-sm font-medium">Tema</span>
                    <ThemeToggle showLabel={false} />
                 </div>
-                {/* Botón de cerrar sesión MOVIDO al modal de perfil, aquí solo dejamos ThemeToggle o enlaces extras */}
             </div>
-         </div>
+          </div>
       </div>
 
-      {/* ==========================================
-          BOTTOM NAVIGATION BAR (Fija)
-         ========================================== */}
+      {/* BOTTOM NAVIGATION BAR */}
       <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 h-16 bg-card/95 backdrop-blur-md border-t border-border flex justify-around items-center px-2 pb-safe shadow-[0_-1px_2px_rgba(0,0,0,0.05)]">
         
         <BottomNavItem icon={HomeIcon} label="Inicio" href="/dashboard" isActive={pathname === "/dashboard"} />
@@ -357,10 +356,9 @@ export function Sidebar() {
         
         <BottomNavItem icon={BanknotesIcon} label="Gastos" href="/gastos" isActive={pathname.startsWith("/gastos")} />
         
-        {/* Perfil Button */}
         <div 
           onClick={() => {
-             setIsMobileMenuOpen(false); // Cerrar menú si está abierto
+             setIsMobileMenuOpen(false);
              user && setIsProfileModalOpen(true);
           }}
           className="flex flex-col items-center justify-center w-full h-full space-y-1 cursor-pointer active:scale-95 transition-transform"
@@ -375,7 +373,6 @@ export function Sidebar() {
           <span className="text-[10px] font-medium text-muted-foreground">Perfil</span>
         </div>
 
-        {/* Menu Button */}
         <BottomNavItem 
           icon={isMobileMenuOpen ? ChevronDownIcon : Bars3Icon} 
           label={isMobileMenuOpen ? "Cerrar" : "Menú"} 
@@ -385,9 +382,7 @@ export function Sidebar() {
       </div>
 
 
-      {/* ==========================================
-          DESKTOP SIDEBAR
-         ========================================== */}
+      {/* DESKTOP SIDEBAR */}
       <aside
         className={cn(
           "hidden lg:flex fixed top-0 left-0 z-40 h-screen bg-card border-r border-border shadow-xl lg:shadow-none",
@@ -395,14 +390,12 @@ export function Sidebar() {
           isSidebarCollapsed ? "w-20" : "w-64"
         )}
       >
-        {/* Botón Colapsar Desktop */}
         <div className="hidden lg:flex absolute -right-3 top-9 z-50">
           <Button onClick={toggleSidebar} size="icon" variant="outline" className="h-6 w-6 rounded-full bg-card border border-border shadow-sm hover:bg-accent p-0">
             {isSidebarCollapsed ? <ChevronRightIcon className="h-3 w-3" /> : <ChevronLeftIcon className="h-3 w-3" />}
           </Button>
         </div>
 
-        {/* LOGO */}
         <div className={cn("mb-6 flex items-center px-4 h-10 transition-all duration-500 mt-4", isSidebarCollapsed ? "justify-center" : "justify-start")}>
           <div className="h-8 w-8 rounded-lg bg-primary flex flex-shrink-0 items-center justify-center text-primary-foreground font-bold shadow-lg shadow-primary/30">
             $
@@ -412,7 +405,6 @@ export function Sidebar() {
           </div>
         </div>
 
-        {/* NAVEGACIÓN */}
         <div className="flex-1 space-y-1 px-3 overflow-y-auto custom-scrollbar">
           <p className={cn("px-2 text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2 whitespace-nowrap transition-all duration-300", isSidebarCollapsed ? "w-0 opacity-0 translate-x-[-10px]" : "w-auto opacity-100 translate-x-0 delay-200")}>
             Menu Principal
@@ -420,7 +412,6 @@ export function Sidebar() {
           {renderNavItems(false)}
         </div>
 
-        {/* FOOTER */}
         <div className="mt-auto border-t border-border px-3 pt-3 pb-2 space-y-1 bg-card">
           <div className={cn("flex transition-all duration-500", isSidebarCollapsed ? "justify-center mb-2" : "mb-1")}>
             <ThemeToggle showLabel={!isSidebarCollapsed} />
@@ -443,10 +434,8 @@ export function Sidebar() {
         </div>
       </aside>
 
-      {/* MODAL DE PERFIL (COMPARTIDO) */}
       {user && (
         <Modal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} title="Mi Perfil">
-          {/* Pasamos handleLogout al componente para usarlo en el botón móvil */}
           <UserProfileDetail user={user} onLogout={handleLogout} />
         </Modal>
       )}
