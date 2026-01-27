@@ -1,3 +1,7 @@
+# NOTA
+
+Este README está en actualización para incluir instrucciones de ejecución con Docker (Compose) en entornos de desarrollo. Mientras definimos el flujo final, se recomienda ejecutar el proyecto de forma local: el backend con un **entorno virtual de Python (venv)** y el frontend con **Node.js**.
+
 # 💰 Control de Gastos Personal
 
 Una aplicación Full-Stack robusta para la gestión de finanzas personales, diseñada con una arquitectura escalable, modular y totalmente contenedorizada.
@@ -52,14 +56,15 @@ POSTGRES_PORT=5432
 ```
 Configuración de App
 ```
-SECRET_KEY=tu_super_secret_key_generada
-ADMIN_EMAIL=admin@gastos.com # ¡Usa un dominio válido (.com), no .local!
+SECRET_KEY=tu_secret_key_generada
+ADMIN_EMAIL=admin@gastos.com 
 ADMIN_PASSWORD=admin123
 ```
 ### 2. Levantar la Infraestructura (Docker)
 Inicia solo el contenedor de base de datos:
-
-docker-compose up -d db
+```
+docker compose up -d --build db
+```
 
 ### 3. Configurar el Backend (Local)
 
@@ -84,6 +89,7 @@ alembic upgrade head
 ```
 python initial_data.py
 ```
+
 ---
 
 ## ▶️ Ejecución
