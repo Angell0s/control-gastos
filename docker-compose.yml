@@ -113,12 +113,13 @@ services:
       - ./frontend:/app
       - /app/node_modules
       - /app/.next
-      # --- SOLUCIÓN AQUÍ ---
-      # Mapeamos el .env de la raíz al lugar donde Next.js lo espera
-      - ./.env:/app/.env 
+      - ./.env:/app/.env
     networks:
       - gastos_network
-    command: npm run dev
+
+    command: >
+      sh -c "if [ \"$ENVIRONMENT\" = \"production\" ]; then npm run dev; else npm run dev; fi"
+
 
   # Túnel de Cloudflare
   cloudflared:

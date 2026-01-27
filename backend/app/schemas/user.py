@@ -4,7 +4,7 @@ from typing import Optional
 from uuid import UUID
 from datetime import datetime
 
-# 1. UserBase: Datos compartidos
+# UserBase: Datos compartidos
 class UserBase(BaseModel):
     email: EmailStr
     is_active: bool = True
@@ -14,31 +14,27 @@ class UserBase(BaseModel):
     last_name: Optional[str] = None
     phone: Optional[str] = None
     
-    # ✅ Nuevo campo de bitácora
     last_login: Optional[datetime] = None 
 
-# 2. UserCreate
+# UserCreate
 class UserCreate(UserBase):
     password: str
 
-# 3. UserUpdate
+# UserUpdate
 class UserUpdate(BaseModel):
     """Schema para actualizar un usuario (campos opcionales)"""
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
-    password: Optional[str] = None  # Si se envía, se hasheará
-    is_active: Optional[bool] = None  # Solo admin
-    is_superuser: Optional[bool] = None  # Solo admin
+    password: Optional[str] = None  
+    is_active: Optional[bool] = None  
+    is_superuser: Optional[bool] = None  
 
 
-# ✅ 4. UserResponse (Perfil Público/Propio)
-# NO muestra el ID de Telegram, solo si está vinculado
 class UserResponse(UserBase):
     id: UUID
     
-    # Campo interno para leer del ORM (excluido del JSON final si no se pide explícitamente)
     telegram_chat_id: Optional[int] = None 
 
     @computed_field
@@ -49,8 +45,6 @@ class UserResponse(UserBase):
 
     model_config = ConfigDict(from_attributes=True)
 
-# ✅ 5. UserResponseAdmin (Vista de Administrador)
-# SÍ muestra el ID de Telegram para soporte/debug
 class UserResponseAdmin(UserBase):
     id: UUID
     telegram_chat_id: Optional[int] = None
@@ -62,7 +56,7 @@ class UserResponseAdmin(UserBase):
 
     model_config = ConfigDict(from_attributes=True)
 
-# 6. UserSignup
+# UserSignup
 class UserSignup(BaseModel):
     email: EmailStr
     password: str
