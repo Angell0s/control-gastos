@@ -16,7 +16,7 @@ from app.services.audit import log_activity
 router = APIRouter()
 
 # ============================================================================
-# 🛠️ HELPERS DE CONSULTA (REUTILIZABLES)
+#  HELPERS DE CONSULTA (REUTILIZABLES)
 # ============================================================================
 
 def _build_base_query(user_id_for_counts: Optional[UUID] = None):
@@ -83,7 +83,7 @@ async def get_or_create_global_others(db: AsyncSession) -> Category:
     return otros
 
 # ============================================================================
-# 👑 ENDPOINTS ADMIN
+# ENDPOINTS ADMIN
 # ============================================================================
 
 @router.get("/admin/all", response_model=List[CategoryResponse])
@@ -146,7 +146,7 @@ async def bulk_delete_categories(
         raise HTTPException(status_code=500, detail="Error eliminando categorías masivamente")
 
 # ============================================================================
-# 👑 ENDPOINT NUEVO: CREACIÓN GLOBAL CON FUSIÓN
+# ENDPOINT NUEVO: CREACIÓN GLOBAL CON FUSIÓN
 # ============================================================================
 
 @router.post("/admin/create-global-merge", response_model=CategoryMergeResponse, status_code=status.HTTP_201_CREATED)
@@ -207,7 +207,6 @@ async def create_global_category_with_merge(
         )
 
     except HTTPException as he:
-        # ✅ Corrección: Capturar esto explícitamente para que no caiga en el 500
         raise he
     except Exception as e:
         await db.rollback()
@@ -215,7 +214,7 @@ async def create_global_category_with_merge(
         raise HTTPException(status_code=500, detail="Error creando categoría global con fusión.")
 
 # ============================================================================
-# 👤 ENDPOINTS USUARIO (CRUD Normal)
+# ENDPOINTS USUARIO (CRUD Normal)
 # ============================================================================
 
 @router.get("/", response_model=List[CategoryResponse])
