@@ -11,16 +11,17 @@ import { FancyCheckbox } from '@/components/ui/FancyCheckbox';
 import Link from 'next/link';
 import { DocumentTextIcon } from "@heroicons/react/24/outline";
 
-// ✅ Importamos el hook del sistema de modales
+// Importamos el hook del sistema de modales
 import { useModal } from '@/components/providers/ModalProvider';
-console.log("ENV API:", process.env.NEXT_PUBLIC_API_URL)
+
+//console.log("ENV API:", process.env.NEXT_PUBLIC_API_URL)
 export default function LoginPage() {
   const router = useRouter();
   
   const setToken = useAuthStore((state) => state.setToken);
   const isAuth = useAuthStore((state) => state.isAuth);
   
-  // ✅ Hook para abrir modales globales
+  // Hook para abrir modales globales
   const { openModal } = useModal(); 
 
   // Estados comunes
@@ -47,7 +48,7 @@ export default function LoginPage() {
     }
   }, [isAuth, router]);
 
-  // ✅ Función centralizada para abrir el modal de privacidad con el botón extra
+  // Función centralizada para abrir el modal de privacidad con el botón extra
   const handleOpenPrivacy = () => {
     openModal("PRIVACY_POLICY", {
         // Pasamos el botón de redirección como footer extra
@@ -245,7 +246,7 @@ export default function LoginPage() {
         </div>
       </div>
 
-      {/* ✅ Footer externo visible siempre */}
+      {/* Footer externo visible siempre */}
       <div className="mt-8 text-center text-xs text-gray-500 dark:text-gray-500">
         <button 
             type="button"

@@ -33,19 +33,21 @@ import { useAuthStore } from "@/store/authStore";
 import { useUIStore } from "@/store/uiStore";
 import { ThemeToggle } from "./ThemeToggle";
 
-// --- TIPOS DE NAVEGACIÓN (Sin cambios) ---
-type NavItem = {
+type IconSVGProps =
+  React.PropsWithoutRef<React.SVGProps<SVGSVGElement>> &
+  React.RefAttributes<SVGSVGElement>;
+
+type IconProps = IconSVGProps & { title?: string; titleId?: string };
+
+type IconType = React.FC<IconProps>;
+
+interface NavItem {
   name: string;
   href: string;
-  icon: (props: React.ComponentProps<'svg'>) => React.JSX.Element;
-  requiredPermission?: 'superuser';
-  children?: {
-    name: string;
-    href: string;
-    icon?: (props: React.ComponentProps<'svg'>) => React.JSX.Element;
-    action?: string;
-  }[];
-};
+  icon: IconType;
+  requiredPermission?: "superuser";
+  children?: { name: string; href: string; icon: IconType }[];
+}
 
 const navigation: NavItem[] = [
   { name: "Dashboard", href: "/dashboard", icon: HomeIcon },
