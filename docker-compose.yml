@@ -116,9 +116,16 @@ services:
       - ./.env:/app/.env
     networks:
       - gastos_network
-
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT} 
     command: >
-      sh -c "if [ \"$ENVIRONMENT\" = \"production\" ]; then npm run dev; else npm run dev; fi"
+      sh -c "if [ \"$ENVIRONMENT\" = \"production\" ]; then
+        echo 'Iniciando en modo PRODUCCIÓN...';
+        npm run build && npm start;
+      else
+        echo 'Iniciando en modo DESARROLLO...';
+        npm run dev;
+      fi"
 
 
   # Túnel de Cloudflare
