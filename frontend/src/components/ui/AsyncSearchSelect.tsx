@@ -95,23 +95,20 @@ interface Coords {
 /**
  * Hook para calcular posición. 
  */
-function useDropdownPosition(
-  triggerRef: React.RefObject<HTMLElement>,
+function useDropdownPosition<T extends HTMLElement>(
+  triggerRef: React.RefObject<T | null>,
   open: boolean,
   menuHeight: number = 240,
   gap: number = 6
 ) {
   const [menuPosition, setMenuPosition] = useState<MenuPosition>("bottom");
-  const [coords, setCoords] = useState<Coords>({
-    top: 0,
-    left: 0,
-    width: 0,
-  });
+  const [coords, setCoords] = useState<Coords>({ top: 0, left: 0, width: 0 });
 
   const updatePosition = useCallback(() => {
-    if (!triggerRef.current) return;
+    const el = triggerRef.current;
+    if (!el) return;
 
-    const rect = triggerRef.current.getBoundingClientRect();
+    const rect = el.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
     const spaceAbove = rect.top;
 
@@ -123,12 +120,8 @@ function useDropdownPosition(
     const width = Math.min(rect.width, maxWidth);
 
     let left = rect.left + window.scrollX;
-    if (left + width > viewportWidth - 8) {
-      left = viewportWidth - width - 8;
-    }
-    if (left < 8) {
-      left = 8;
-    }
+    if (left + width > viewportWidth - 8) left = viewportWidth - width - 8;
+    if (left < 8) left = 8;
 
     const top =
       nextPosition === "bottom"
@@ -136,12 +129,7 @@ function useDropdownPosition(
         : rect.top + window.scrollY - gap;
 
     setMenuPosition((prev) => (prev === nextPosition ? prev : nextPosition));
-    setCoords((prev) => {
-      if (prev.top === top && prev.left === left && prev.width === width) {
-        return prev;
-      }
-      return { top, left, width };
-    });
+    setCoords((prev) => (prev.top === top && prev.left === left && prev.width === width ? prev : { top, left, width }));
   }, [triggerRef, menuHeight, gap]);
 
   useEffect(() => {
@@ -153,6 +141,7 @@ function useDropdownPosition(
 
   return { menuPosition, coords };
 }
+
 
 export function AsyncSearchSelect({
   value,
