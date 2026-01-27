@@ -18,10 +18,9 @@ export default function Home() {
           priority
         />
 
-        {/* Texto de Bienvenida */}
         <div className="flex flex-col items-center gap-4">
           <h1 className="text-4xl font-bold tracking-tight text-black dark:text-zinc-50">
-            Bienvenido a Gastos App
+            Bienvenido a mi aplicación
           </h1>
           <p className="max-w-md text-lg leading-7 text-zinc-600 dark:text-zinc-400">
             Gestiona tus finanzas de forma inteligente y mantén el control de tus ahorros en un solo lugar.
@@ -35,24 +34,9 @@ export default function Home() {
               Inicia sesión para empezar
             </Button>
           </Link>
-          
-          <p className="text-sm text-zinc-500 dark:text-zinc-500">
-            ¿No tienes cuenta? <Link href="/login" className="text-blue-600 hover:underline">Regístrate gratis</Link>
-          </p>
         </div>
 
         <hr className="w-full border-zinc-100 dark:border-zinc-800 mt-4" />
-
-        {/* Footer Minimalista */}
-        <div className="flex gap-6 text-sm text-zinc-500 dark:text-zinc-400">
-          <a href="https://nextjs.org/docs" target="_blank" className="hover:text-black dark:hover:text-white transition-colors">
-            Documentación
-          </a>
-          <span>•</span>
-          <a href="https://vercel.com/templates" target="_blank" className="hover:text-black dark:hover:text-white transition-colors">
-            Plantillas
-          </a>
-        </div>
       </main>
     </div>
   );
