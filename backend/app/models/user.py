@@ -26,8 +26,6 @@ class User(Base):
     
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=datetime.utcnow)
-    
-    # ✅ NUEVO CAMPO: Último inicio de sesión
     last_login: Mapped[Optional[datetime]] = mapped_column(nullable=True)
 
     is_active = Column(Boolean(), default=True)
