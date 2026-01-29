@@ -1,3 +1,4 @@
+//frontend\src\components\AuthProvider.tsx
 "use client";
 
 import { useEffect } from "react";
